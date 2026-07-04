@@ -457,6 +457,63 @@ class TestReviewQueue:
 
 
 # ---------------------------------------------------------------------------
+# Tests — Timing Instrumentation
+# ---------------------------------------------------------------------------
+
+
+class TestTiming:
+    @pytest.mark.asyncio
+    async def test_response_has_timing(self):
+        client = _build_mock_client()
+        result = await run_board(CCP014, client)
+        assert "timing" in result
+        t = result["timing"]
+        assert "board_total_seconds" in t
+        assert "archivist_seconds" in t
+        assert "specialist_seconds" in t
+        assert "chair_seconds" in t
+        assert "per_agent_seconds" in t
+
+    @pytest.mark.asyncio
+    async def test_timing_values_are_positive(self):
+        client = _build_mock_client()
+        result = await run_board(CCP014, client)
+        t = result["timing"]
+        assert t["board_total_seconds"] > 0
+        assert t["archivist_seconds"] >= 0
+        assert t["specialist_seconds"] >= 0
+        assert t["chair_seconds"] >= 0
+
+    @pytest.mark.asyncio
+    async def test_per_agent_has_all_keys(self):
+        client = _build_mock_client()
+        result = await run_board(CCP014, client)
+        per_agent = result["timing"]["per_agent_seconds"]
+        assert set(per_agent.keys()) == {"endocrine", "cardiology", "nephrology"}
+        for key in per_agent:
+            assert isinstance(per_agent[key], float)
+            assert per_agent[key] >= 0
+
+    @pytest.mark.asyncio
+    async def test_board_total_is_sum_of_parts(self):
+        """board_total ≈ archivist + specialist + chair (within rounding)."""
+        client = _build_mock_client()
+        result = await run_board(CCP014, client)
+        t = result["timing"]
+        parts_sum = t["archivist_seconds"] + t["specialist_seconds"] + t["chair_seconds"]
+        assert abs(t["board_total_seconds"] - parts_sum) < 0.05
+
+    @pytest.mark.asyncio
+    async def test_timing_present_even_on_failure(self):
+        """Timing should still be returned when agents fail."""
+        client = _build_mock_client(fail_keys={"nephrology"}, fail_chair=True)
+        result = await run_board(CCP014, client)
+        assert "timing" in result
+        assert result["timing"]["board_total_seconds"] > 0
+        assert result["timing"]["per_agent_seconds"]["nephrology"] >= 0
+
+
+# ---------------------------------------------------------------------------
 # Tests — no identifiers in prompts
 # ---------------------------------------------------------------------------
 

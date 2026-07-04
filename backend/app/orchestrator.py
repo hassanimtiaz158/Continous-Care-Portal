@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -240,26 +241,33 @@ async def run_specialists(
     clinical: ClinicalPayload,
     archivist: StructuredClinicalSummary,
     patient_id: str,
-) -> dict[str, dict[str, Any]]:
+) -> tuple[dict[str, dict[str, Any]], dict[str, float]]:
     """Call all specialist agents in parallel, then apply Double Grounding.
 
-    Uses asyncio.gather(return_exceptions=True) so one agent failure
-    does not kill the others — TDD §2.6 AI Failure Handling.
-
-    Failed agents get the fallback payload AND a manual review queue entry.
+    Returns (results, per_agent_seconds).
     """
     user_content = _build_specialist_prompt(clinical, archivist)
 
-    async def _safe_call(agent: AgentDef) -> dict[str, Any]:
+    async def _safe_call(agent: AgentDef) -> tuple[dict[str, Any], float]:
+        t0 = time.perf_counter()
         try:
-            return await _call_agent(client, agent, user_content)
+            result = await _call_agent(client, agent, user_content)
+            elapsed = time.perf_counter() - t0
+            return result, elapsed
         except Exception as exc:
+            elapsed = time.perf_counter() - t0
             logger.exception("Agent %s failed", agent.key)
             _enqueue_review(patient_id, agent.key, str(exc))
-            return dict(_AGENT_FAILURE_PAYLOAD)
+            return dict(_AGENT_FAILURE_PAYLOAD), elapsed
 
     tasks = [_safe_call(agent) for agent in AGENTS]
-    raw_results = await asyncio.gather(*tasks)
+    raw_pairs = await asyncio.gather(*tasks)
+
+    per_agent_seconds: dict[str, float] = {}
+    raw_results = []
+    for agent, (raw, elapsed) in zip(AGENTS, raw_pairs):
+        per_agent_seconds[agent.key] = round(elapsed, 3)
+        raw_results.append(raw)
 
     # --- Double Grounding Validation (§2.5) ---
     validated: dict[str, dict[str, Any]] = {}
@@ -277,7 +285,7 @@ async def run_specialists(
             )
         validated[agent.key] = grounded
 
-    return validated
+    return validated, per_agent_seconds
 
 
 # ---------------------------------------------------------------------------
@@ -288,21 +296,22 @@ async def run_chair(
     client: anthropic.AsyncAnthropic,
     specialist_results: dict[str, dict[str, Any]],
     patient_id: str,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], float]:
     """Call the Board Chair agent for synthesis.
 
-    If the Chair fails, a fallback consensus is returned and a manual
-    review queue entry is created — the patient never disappears.
+    Returns (result, elapsed_seconds).
     """
     user_content = _build_chair_prompt(specialist_results)
+    t0 = time.perf_counter()
     try:
         result = await _call_chair(client, user_content)
-        # Strip any internal flags before returning
-        return {k: v for k, v in result.items() if not k.startswith("_")}
+        elapsed = time.perf_counter() - t0
+        return {k: v for k, v in result.items() if not k.startswith("_")}, elapsed
     except Exception as exc:
+        elapsed = time.perf_counter() - t0
         logger.exception("Board Chair agent failed")
         _enqueue_review(patient_id, "chair", str(exc))
-        return {k: v for k, v in _CHAIR_FAILURE_PAYLOAD.items() if not k.startswith("_")}
+        return {k: v for k, v in _CHAIR_FAILURE_PAYLOAD.items() if not k.startswith("_")}, elapsed
 
 
 # ---------------------------------------------------------------------------
@@ -323,12 +332,19 @@ async def run_board(
     6. Compute confidence scores per specialist.
     7. Return the full validated response payload.
     """
+    t_board_start = time.perf_counter()
+
+    t_archivist = time.perf_counter()
     archivist = compute_archivist_summary(patient)
+    elapsed_archivist = round(time.perf_counter() - t_archivist, 3)
+
     clinical = deidentify(patient)
-    specialist_results = await run_specialists(client, clinical, archivist, patient.id)
+    specialist_results, per_agent_seconds = await run_specialists(client, clinical, archivist, patient.id)
 
     # --- Board Chair Agent (§2.3) ---
-    consensus = await run_chair(client, specialist_results, patient.id)
+    consensus, elapsed_chair = await run_chair(client, specialist_results, patient.id)
+
+    elapsed_board_total = round(time.perf_counter() - t_board_start, 3)
 
     # --- Confidence Scoring (§2.7) — per-finding + per-agent ---
     confidence_scores: dict[str, int] = {}
@@ -364,4 +380,11 @@ async def run_board(
         "data_completeness": archivist.completeness,
         "missing_fields": archivist.missing_fields,
         "confidence_scores": confidence_scores,
+        "timing": {
+            "board_total_seconds": elapsed_board_total,
+            "archivist_seconds": elapsed_archivist,
+            "specialist_seconds": round(elapsed_board_total - elapsed_archivist - elapsed_chair, 3),
+            "chair_seconds": elapsed_chair,
+            "per_agent_seconds": per_agent_seconds,
+        },
     }

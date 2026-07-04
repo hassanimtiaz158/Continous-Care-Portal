@@ -85,7 +85,6 @@ export default function ClinicalBoard() {
   const sessionRef = useRef(null);
 
   async function runBoard() {
-    const start = performance.now();
     setStatus("running");
     setErrMsg(null);
     setConsensus(null);
@@ -125,7 +124,7 @@ export default function ClinicalBoard() {
       setResults(next);
       setEditText(data.consensus?.joint_plan || "");
       setStatus("done");
-      setTiming(((performance.now() - start) / 1000).toFixed(1));
+      setTiming(data.timing || null);
     } catch (e) {
       setErrMsg(e.message || "The board could not complete. Please try again.");
       setStatus("error");
@@ -234,7 +233,14 @@ export default function ClinicalBoard() {
           {status === "running" && "Board reviewing…"}
           {(status === "done" || status === "error") && "Re-run the board"}
         </button>
-        {timing && <div style={styles.timingNote}>Board response time: {timing}s</div>}
+        {timing && (
+          <div style={styles.timingNote}>
+            Board: {timing.board_total_seconds}s
+            {timing.per_agent_seconds && Object.entries(timing.per_agent_seconds).map(([k, v]) => (
+              <span key={k}> · {k}: {v}s</span>
+            ))}
+          </div>
+        )}
         {errMsg && <div style={styles.errText}>{errMsg}</div>}
         {auditTrail.length > 0 && (
           <button style={styles.linkButton} onClick={toggleAudit}>

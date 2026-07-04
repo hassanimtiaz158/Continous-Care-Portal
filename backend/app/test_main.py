@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import audit
-from app.audit import create_session, init_audit_db
+from app.audit import create_session, init_audit_db, record_decision
 from app.main import app
 
 
@@ -177,3 +177,82 @@ def test_full_decision_flow():
     assert data["physician_note"] == "Changed dosage."
     assert data["physician_name"] == "Dr. Reviewer"
     assert data["decided_at"] is not None
+
+
+# ---------------------------------------------------------------------------
+# GET /api/board/export/{session_id}
+# ---------------------------------------------------------------------------
+
+
+def _make_session_with_findings() -> str:
+    return create_session(
+        patient_id="CCP-014",
+        specialist_results={
+            "endocrine": {
+                "risk_level": "watch",
+                "findings": [{"text": "HbA1c 8.6%", "metric": "hba1c"}],
+                "recommendation": "Intensify glycemic control.",
+            },
+            "cardiology": {
+                "risk_level": "watch",
+                "findings": [{"text": "BP 158/96", "metric": "bp"}],
+                "recommendation": "Optimize antihypertensive therapy.",
+            },
+            "nephrology": {
+                "risk_level": "urgent",
+                "findings": [{"text": "eGFR 58", "metric": "egfr"}],
+                "recommendation": "Urgent nephrology referral.",
+            },
+        },
+        consensus={
+            "joint_plan": "Synthesized plan: intensify glycemic and BP control.",
+            "priority_actions": ["Action 1", "Action 2"],
+            "conflicts": ["Cardiology vs nephrology drug choice."],
+        },
+        data_completeness=75,
+        confidence_scores={"endocrine": 82, "cardiology": 82, "nephrology": 86},
+    )
+
+
+def test_export_returns_pdf():
+    sid = _make_session_with_findings()
+    r = client.get(f"/api/board/export/{sid}")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert b"%PDF" in r.content
+
+
+def test_export_has_content_disposition():
+    sid = _make_session_with_findings()
+    r = client.get(f"/api/board/export/{sid}")
+    assert "review-packet.pdf" in r.headers.get("content-disposition", "")
+
+
+def test_export_nonexistent_returns_404():
+    r = client.get("/api/board/export/CCP-SESSION-does-not-exist")
+    assert r.status_code == 404
+
+
+def test_export_with_decision_includes_stamp():
+    sid = _make_session_with_findings()
+    record_decision(sid, decision="approved", physician_name="Dr. Smith")
+    r = client.get(f"/api/board/export/{sid}")
+    assert r.status_code == 200
+    assert b"%PDF" in r.content
+
+
+def test_export_with_all_sections():
+    """PDF should be generated with all sections of the review."""
+    sid = _make_session_with_findings()
+    record_decision(
+        sid,
+        decision="edited",
+        edited_text="Revised plan.",
+        physician_note="Adjusted for renal function.",
+        physician_name="Dr. Reviewer",
+    )
+    r = client.get(f"/api/board/export/{sid}")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.content[:5] == b"%PDF-"
+    assert b"CCP-014" in r.content

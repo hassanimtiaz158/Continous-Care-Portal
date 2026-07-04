@@ -51,6 +51,9 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             created_at    TEXT NOT NULL,
             agent_status  TEXT NOT NULL,
             recommendations TEXT NOT NULL,
+            specialist_risk_levels TEXT,
+            specialist_findings    TEXT,
+            consensus    TEXT,
             data_completeness INTEGER,
             confidence_scores TEXT,
             -- physician decision fields (initially NULL)
@@ -62,6 +65,15 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         );
         """
     )
+    # Migrate: add columns that may not exist in older databases
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(board_sessions)").fetchall()}
+    for col, default in [
+        ("specialist_risk_levels", None),
+        ("specialist_findings", None),
+        ("consensus", None),
+    ]:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE board_sessions ADD COLUMN {col} TEXT")
     conn.commit()
 
 
@@ -110,13 +122,23 @@ def create_session(
     for key, result in specialist_results.items():
         recommendations[key] = result.get("recommendation", "")
 
+    specialist_risk_levels: dict[str, str] = {}
+    specialist_findings: dict[str, list] = {}
+    for key, result in specialist_results.items():
+        specialist_risk_levels[key] = result.get("risk_level", "stable")
+        specialist_findings[key] = [
+            {"text": f.get("text", ""), "metric": f.get("metric")}
+            for f in result.get("findings", [])
+        ]
+
     conn = _get_conn()
     conn.execute(
         """
         INSERT INTO board_sessions
             (session_id, patient_id, created_at, agent_status,
-             recommendations, data_completeness, confidence_scores)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+             recommendations, specialist_risk_levels, specialist_findings,
+             consensus, data_completeness, confidence_scores)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             session_id,
@@ -124,6 +146,9 @@ def create_session(
             now,
             json.dumps(agent_status),
             json.dumps(recommendations),
+            json.dumps(specialist_risk_levels),
+            json.dumps(specialist_findings),
+            json.dumps(consensus),
             data_completeness,
             json.dumps(confidence_scores),
         ),
@@ -185,6 +210,9 @@ def get_audit_trail(session_id: str) -> dict[str, Any] | None:
         "created_at": row["created_at"],
         "agent_status": json.loads(row["agent_status"]),
         "recommendations": json.loads(row["recommendations"]),
+        "specialist_risk_levels": json.loads(row["specialist_risk_levels"]) if row["specialist_risk_levels"] else {},
+        "specialist_findings": json.loads(row["specialist_findings"]) if row["specialist_findings"] else {},
+        "consensus": json.loads(row["consensus"]) if row["consensus"] else {},
         "data_completeness": row["data_completeness"],
         "confidence_scores": json.loads(row["confidence_scores"]) if row["confidence_scores"] else {},
         "decision": row["decision"],

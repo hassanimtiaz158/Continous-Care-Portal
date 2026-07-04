@@ -5,9 +5,11 @@ import anthropic
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from app.audit import get_audit_trail, init_audit_db, record_decision
+from app.export import generate_export_pdf
 from app.models import Patient, TimePoint, BPPoint
 from app.orchestrator import run_board, get_review_queue
 
@@ -136,6 +138,68 @@ def board_audit(session_id: str):
     if trail is None:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     return trail
+
+
+@app.get("/api/board/export/{session_id}")
+def board_export(session_id: str):
+    """Return a PDF review packet for the given session (TDD §2.15)."""
+    trail = get_audit_trail(session_id)
+    if trail is None:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+
+    patient = _PATIENTS.get(trail["patient_id"])
+    if patient is None:
+        raise HTTPException(status_code=404, detail=f"Patient {trail['patient_id']} not found")
+
+    pdf_bytes = generate_export_pdf(
+        patient_id=patient.id,
+        patient_name=patient.name,
+        patient_age=patient.age,
+        patient_sex=patient.sex,
+        patient_dx=patient.dx,
+        patient_meds=patient.meds,
+        archivist_summary={
+            "metrics": {},
+            "threshold_crossings": [],
+            "missing_fields": patient.missing_fields,
+            "completeness": trail.get("data_completeness"),
+        },
+        specialist_results={
+            k: {
+                "risk_level": trail.get("specialist_risk_levels", {}).get(k, "stable"),
+                "findings": trail.get("specialist_findings", {}).get(k, []),
+                "recommendation": trail.get("recommendations", {}).get(k, ""),
+                "failed": trail.get("agent_status", {}).get(k) == "failed",
+            }
+            for k in ("endocrine", "cardiology", "nephrology")
+        },
+        consensus=trail.get("consensus", {}),
+        decision=trail.get("decision"),
+        edited_text=trail.get("edited_text"),
+        physician_note=trail.get("physician_note"),
+        physician_name=trail.get("physician_name"),
+        decided_at=trail.get("decided_at"),
+        data_completeness=trail.get("data_completeness"),
+        confidence_scores=trail.get("confidence_scores"),
+        audit_log=[
+            {"ts": trail["created_at"], "event": "session_created"},
+            *[
+                {"ts": trail["created_at"], "event": f"agent_{status}", "agent": agent}
+                for agent, status in trail.get("agent_status", {}).items()
+            ],
+            *(
+                [{"ts": trail["decided_at"], "event": "physician_decision", "decision": trail["decision"], "physician": trail.get("physician_name")}]
+                if trail.get("decision")
+                else []
+            ),
+        ],
+    )
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{session_id}-review-packet.pdf"'},
+    )
 
 
 @app.get("/api/review-queue")

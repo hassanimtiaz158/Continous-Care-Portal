@@ -231,7 +231,8 @@ class TestGetAuditTrail:
         trail = get_audit_trail(sid)
         expected_keys = {
             "session_id", "patient_id", "created_at",
-            "agent_status", "recommendations", "data_completeness",
+            "agent_status", "recommendations", "specialist_risk_levels",
+            "specialist_findings", "consensus", "data_completeness",
             "confidence_scores", "decision", "edited_text",
             "physician_note", "physician_name", "decided_at",
         }

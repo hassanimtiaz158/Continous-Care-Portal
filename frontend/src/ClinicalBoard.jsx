@@ -179,26 +179,21 @@ export default function ClinicalBoard() {
     setShowAudit((s) => !s);
   }
 
-  function exportPacket() {
-    const packet = {
-      patient: { id: PATIENT.id, name: PATIENT.name },
-      archivistSummary: archivist,
-      specialistResults: results,
-      consensus,
-      decision,
-      physician: physician || "reviewing physician",
-      note,
-      timingSeconds: timing,
-      auditTrail,
-      nonGoalsNotice: "The Clinical Board does not diagnose, prescribe, or make final treatment decisions. All recommendations require physician review.",
-    };
-    const blob = new Blob([JSON.stringify(packet, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${PATIENT.id}-review-packet.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+  async function exportPacket() {
+    if (!sessionRef.current) return;
+    try {
+      const res = await fetch(`/api/board/export/${sessionRef.current}`);
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${PATIENT.id}-review-packet.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      // Silently fail — export is non-critical
+    }
   }
 
   return (

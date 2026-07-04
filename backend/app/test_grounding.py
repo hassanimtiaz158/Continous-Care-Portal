@@ -214,3 +214,130 @@ class TestValidateFindings:
         result = validate_findings(specialist_result, archivist)
         assert result["findings"] == []
         assert result["withheld_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Adversarial tests — confirm zero hallucinated values reach the UI
+# ---------------------------------------------------------------------------
+
+
+class TestAdversarialHallucination:
+    """Simulate realistic LLM hallucination patterns and confirm they are blocked."""
+
+    def test_fabricated_hba1c_critical(self, archivist: StructuredClinicalSummary):
+        """LLM claims HbA1c is 12.5% — not in patient record → withheld."""
+        result = validate_finding(
+            {"text": "HbA1c is critically elevated at 12.5%", "metric": "hba1c"},
+            archivist,
+        )
+        assert result["grounded"] is False
+
+    def test_fabricated_egfr_normal(self, archivist: StructuredClinicalSummary):
+        """LLM claims eGFR is 95 — patient is at 58 → withheld."""
+        result = validate_finding(
+            {"text": "eGFR preserved at 95 mL/min", "metric": "egfr"},
+            archivist,
+        )
+        assert result["grounded"] is False
+
+    def test_fabricated_bp_optimal(self, archivist: StructuredClinicalSummary):
+        """LLM claims BP is 120/80 — patient is at 158/96 → withheld."""
+        result = validate_finding(
+            {"text": "Blood pressure well controlled at 120/80", "metric": "bp"},
+            archivist,
+        )
+        assert result["grounded"] is False
+
+    def test_fabricated_ldl_target(self, archivist: StructuredClinicalSummary):
+        """LLM claims LDL is 70 — patient is at 134 → withheld."""
+        result = validate_finding(
+            {"text": "LDL at target level of 70 mg/dL", "metric": "ldl"},
+            archivist,
+        )
+        assert result["grounded"] is False
+
+    def test_fabricated_acr_normal(self, archivist: StructuredClinicalSummary):
+        """LLM claims ACR is 15 — patient is at 61 → withheld."""
+        result = validate_finding(
+            {"text": "Albumin-creatinine ratio normal at 15 mg/g", "metric": "acr"},
+            archivist,
+        )
+        assert result["grounded"] is False
+
+    def test_plausible_but_wrong_number(self, archivist: StructuredClinicalSummary):
+        """LLM uses a number close to but not matching any real value → withheld."""
+        # eGFR history: 78, 69, 58. 72 is not in any of these.
+        result = validate_finding(
+            {"text": "eGFR declined to 72 mL/min over the past year", "metric": "egfr"},
+            archivist,
+        )
+        assert result["grounded"] is False
+
+    def test_mixed_real_and_fabricated(self, archivist: StructuredClinicalSummary):
+        """LLM mixes one real value with one fabricated → fabricated withheld, real passes."""
+        result = validate_finding(
+            {"text": "HbA1c at 8.6% and eGFR improved to 85", "metric": "hba1c"},
+            archivist,
+        )
+        # 8.6 is real (passes), 85 is fabricated (withheld)
+        assert result["grounded"] is False
+        assert 85 in result.get("unsupported_values", [])
+
+    def test_fabricated_percentage(self, archivist: StructuredClinicalSummary):
+        """LLM invents a percentage not in the record → withheld."""
+        result = validate_finding(
+            {"text": "Kidney function preserved at 82%", "metric": "egfr"},
+            archivist,
+        )
+        assert result["grounded"] is False
+
+    def test_no_metric_key_withheld(self, archivist: StructuredClinicalSummary):
+        """Finding with no metric key → always withheld (can't verify)."""
+        result = validate_finding(
+            {"text": "Patient shows improvement in all areas", "metric": None},
+            archivist,
+        )
+        assert result["grounded"] is False
+
+    def test_invalid_metric_key_withheld(self, archivist: StructuredClinicalSummary):
+        """Finding with unknown metric key → withheld."""
+        result = validate_finding(
+            {"text": "BMI stable at 28.5", "metric": "bmi"},
+            archivist,
+        )
+        assert result["grounded"] is False
+
+    def test_adversarial_batch_all_withheld(self, archivist: StructuredClinicalSummary):
+        """An agent that hallucinates everything → all findings withheld."""
+        specialist_result = {
+            "risk_level": "watch",
+            "findings": [
+                {"text": "HbA1c improved to 6.5%", "metric": "hba1c"},
+                {"text": "eGFR stable at 90", "metric": "egfr"},
+                {"text": "BP controlled at 118/76", "metric": "bp"},
+                {"text": "LDL at goal 65 mg/dL", "metric": "ldl"},
+            ],
+            "recommendation": "Continue current therapy.",
+        }
+        result = validate_findings(specialist_result, archivist)
+        assert result["withheld_count"] == 4
+        assert len(result["findings"]) == 0
+
+    def test_adversarial_batch_mixed(self, archivist: StructuredClinicalSummary):
+        """Agent mixes real findings with hallucinations → only real pass."""
+        specialist_result = {
+            "risk_level": "urgent",
+            "findings": [
+                {"text": "HbA1c at 8.6%", "metric": "hba1c"},       # real
+                {"text": "HbA1c worsened to 11.0%", "metric": "hba1c"},  # fabricated
+                {"text": "eGFR 58 mL/min", "metric": "egfr"},        # real
+                {"text": "BP controlled at 120/80", "metric": "bp"},  # fabricated
+            ],
+            "recommendation": "Aggressive intervention needed.",
+        }
+        result = validate_findings(specialist_result, archivist)
+        assert result["withheld_count"] == 2
+        assert len(result["findings"]) == 2
+        texts = [f["text"] for f in result["findings"]]
+        assert any("8.6" in t for t in texts)
+        assert any("58" in t for t in texts)

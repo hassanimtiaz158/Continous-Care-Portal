@@ -1,11 +1,11 @@
 import os
 from pathlib import Path
 
-import anthropic
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 from app.audit import get_audit_trail, init_audit_db, record_decision
@@ -79,7 +79,7 @@ class BoardDecisionRequest(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str = "ok"
-    anthropic_key_set: bool
+    groq_key_set: bool
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +90,7 @@ class HealthResponse(BaseModel):
 @app.get("/api/health", response_model=HealthResponse)
 def health():
     return HealthResponse(
-        anthropic_key_set=bool(os.getenv("ANTHROPIC_API_KEY")),
+        groq_key_set=bool(os.getenv("GROQ_API_KEY")),
     )
 
 
@@ -100,11 +100,14 @@ async def board_run(req: BoardRunRequest):
     if patient is None:
         raise HTTPException(status_code=404, detail=f"Patient {req.patient_id} not found")
 
-    api_key = os.getenv("ANTHROPIC_API_KEY")
+    api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
-        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not configured")
+        raise HTTPException(status_code=503, detail="GROQ_API_KEY not configured")
 
-    client = anthropic.AsyncAnthropic(api_key=api_key)
+    client = AsyncOpenAI(
+        api_key=api_key,
+        base_url="https://api.groq.com/openai/v1",
+    )
     try:
         result = await run_board(patient, client)
     finally:

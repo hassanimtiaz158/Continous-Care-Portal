@@ -1,6 +1,6 @@
 """Integration tests for the board orchestrator.
 
-Mocks the Anthropic client so no real API calls are made.
+Mocks the OpenAI client (Groq) so no real API calls are made.
 Asserts the response shape matches CCP_TDD.md §5 API contract.
 """
 
@@ -22,21 +22,17 @@ from app.orchestrator import (
 
 
 # ---------------------------------------------------------------------------
-# Helpers — mock Anthropic response factory
+# Helpers — mock OpenAI/Groq response factory
 # ---------------------------------------------------------------------------
 
 
-def _make_text_block(text: str) -> MagicMock:
-    block = MagicMock()
-    block.type = "text"
-    block.text = text
-    return block
-
-
-def _make_assistant_response(payload: dict[str, Any]) -> MagicMock:
-    msg = MagicMock()
-    msg.content = [_make_text_block(json.dumps(payload))]
-    return msg
+def _make_chat_response(payload: dict[str, Any]) -> MagicMock:
+    """Build a mock ChatCompletion response matching OpenAI SDK shape."""
+    choice = MagicMock()
+    choice.message.content = json.dumps(payload)
+    response = MagicMock()
+    response.choices = [choice]
+    return response
 
 
 _MOCK_CHAIR_RESPONSE: dict[str, Any] = {
@@ -86,7 +82,7 @@ def _build_mock_client(
     fail_chair: bool = False,
     global_error: Exception | None = None,
 ) -> AsyncMock:
-    """Build a mock AsyncAnthropic client with 4 calls (3 specialists + 1 chair).
+    """Build a mock AsyncOpenAI client with 4 calls (3 specialists + 1 chair).
 
     - specialist_responses: per-agent responses (default: _MOCK_SPECIALIST_RESPONSES)
     - chair_response: Chair agent response (default: _MOCK_CHAIR_RESPONSE)
@@ -111,13 +107,13 @@ def _build_mock_client(
             key = agent_order[idx]
             if key in fails:
                 raise RuntimeError(f"Agent {key} timeout")
-            return _make_assistant_response(resps[key])
+            return _make_chat_response(resps[key])
         else:
             if fail_chair:
                 raise RuntimeError("Chair agent timeout")
-            return _make_assistant_response(chair_resp)
+            return _make_chat_response(chair_resp)
 
-    client.messages.create = AsyncMock(side_effect=_create)
+    client.chat.completions.create = AsyncMock(side_effect=_create)
     return client
 
 
@@ -188,10 +184,10 @@ class TestAPIContract:
 
     @pytest.mark.asyncio
     async def test_4_messages_create_calls(self):
-        """3 specialists + 1 chair = 4 messages.create calls."""
+        """3 specialists + 1 chair = 4 chat.completions.create calls."""
         client = _build_mock_client()
         await run_board(CCP014, client)
-        assert client.messages.create.call_count == 4
+        assert client.chat.completions.create.call_count == 4
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 """Backend agent orchestrator — TDD §2.16.
 
-This is the ONLY module that calls the Anthropic API.
+This is the ONLY module that calls the LLM API (Groq via OpenAI SDK).
 All LLM communication flows through here; the frontend never touches
 an API key or a raw system prompt.
 
@@ -20,7 +20,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-import anthropic
+from openai import AsyncOpenAI
 
 from app.agents import AGENTS, CHAIR_SYSTEM, AgentDef
 from app.archivist import compute_archivist_summary
@@ -198,37 +198,37 @@ def _parse_agent_response(raw: str) -> dict[str, Any]:
 
 
 async def _call_agent(
-    client: anthropic.AsyncAnthropic,
+    client: AsyncOpenAI,
     agent: AgentDef,
     user_content: str,
 ) -> dict[str, Any]:
     """Call a single specialist agent and return its parsed JSON response."""
-    message = await client.messages.create(
-        model="claude-sonnet-4-20250514",
+    response = await client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
         max_tokens=1000,
-        system=agent.system,
-        messages=[{"role": "user", "content": user_content}],
+        messages=[
+            {"role": "system", "content": agent.system},
+            {"role": "user", "content": user_content},
+        ],
     )
-    raw = "".join(
-        block.text for block in message.content if block.type == "text"
-    )
+    raw = response.choices[0].message.content or ""
     return _parse_agent_response(raw)
 
 
 async def _call_chair(
-    client: anthropic.AsyncAnthropic,
+    client: AsyncOpenAI,
     user_content: str,
 ) -> dict[str, Any]:
     """Call the Board Chair agent and return its parsed JSON response."""
-    message = await client.messages.create(
-        model="claude-sonnet-4-20250514",
+    response = await client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
         max_tokens=1000,
-        system=CHAIR_SYSTEM,
-        messages=[{"role": "user", "content": user_content}],
+        messages=[
+            {"role": "system", "content": CHAIR_SYSTEM},
+            {"role": "user", "content": user_content},
+        ],
     )
-    raw = "".join(
-        block.text for block in message.content if block.type == "text"
-    )
+    raw = response.choices[0].message.content or ""
     return _parse_agent_response(raw)
 
 
@@ -237,7 +237,7 @@ async def _call_chair(
 # ---------------------------------------------------------------------------
 
 async def run_specialists(
-    client: anthropic.AsyncAnthropic,
+    client: AsyncOpenAI,
     clinical: ClinicalPayload,
     archivist: StructuredClinicalSummary,
     patient_id: str,
@@ -293,7 +293,7 @@ async def run_specialists(
 # ---------------------------------------------------------------------------
 
 async def run_chair(
-    client: anthropic.AsyncAnthropic,
+    client: AsyncOpenAI,
     specialist_results: dict[str, dict[str, Any]],
     patient_id: str,
 ) -> tuple[dict[str, Any], float]:
@@ -320,7 +320,7 @@ async def run_chair(
 
 async def run_board(
     patient: Patient,
-    client: anthropic.AsyncAnthropic,
+    client: AsyncOpenAI,
 ) -> dict[str, Any]:
     """Top-level async orchestrator — full TDD §5 response shape.
 

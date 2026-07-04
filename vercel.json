@@ -1,8 +1,4 @@
 {
-  "installCommand": "npm install",
-  "buildCommand": "npm run build",
-  "outputDirectory": "frontend/dist",
-  "framework": null,
   "rewrites": [
     { "source": "/api/(.*)", "destination": "https://ccp-backend.onrender.com/api/$1" }
   ]

@@ -6,7 +6,7 @@ an API key or a raw system prompt.
 
 Flow:
   Patient → Archivist (deterministic) → De-identify → Specialist Agents
-  (parallel, return_exceptions=True) → raw results (validation is Prompt 4)
+  (parallel, return_exceptions=True) → Double Grounding Validation → response
 """
 
 from __future__ import annotations
@@ -21,17 +21,20 @@ import anthropic
 from app.agents import AGENTS, AgentDef
 from app.archivist import compute_archivist_summary
 from app.deidentify import ClinicalPayload, deidentify
+from app.grounding import validate_findings
 from app.models import Patient, StructuredClinicalSummary
 
 logger = logging.getLogger(__name__)
 
 # Fallback when an agent fails — patient never disappears from the UI.
+# Marked with _fallback=True so grounding validation skips it.
 _AGENT_FAILURE_PAYLOAD: dict[str, Any] = {
     "risk_level": "watch",
     "findings": [
         {"text": "Agent response unavailable.", "metric": None}
     ],
     "recommendation": "Retry the board. Raw archivist data remains available below.",
+    "_fallback": True,
 }
 
 
@@ -87,13 +90,18 @@ async def run_specialists(
     clinical: ClinicalPayload,
     archivist: StructuredClinicalSummary,
 ) -> dict[str, dict[str, Any]]:
-    """Call all specialist agents in parallel.
+    """Call all specialist agents in parallel, then apply Double Grounding.
 
     Uses asyncio.gather(return_exceptions=True) so one agent failure
     does not kill the others — TDD §2.6 AI Failure Handling.
 
-    Returns a dict keyed by agent key, each value is the raw specialist
-    JSON result or the fallback failure payload.
+    After all agents respond, each result passes through grounding
+    validation (TDD §2.5): every numeric claim is verified against
+    the Archivist's structured values.  Unsupported findings are
+    withheld from the API response.
+
+    Returns a dict keyed by agent key, each value is the validated
+    specialist result.
     """
     user_content = _build_prompt(clinical, archivist)
 
@@ -105,9 +113,26 @@ async def run_specialists(
             return dict(_AGENT_FAILURE_PAYLOAD)
 
     tasks = [_safe_call(agent) for agent in AGENTS]
-    results = await asyncio.gather(*tasks)
+    raw_results = await asyncio.gather(*tasks)
 
-    return {agent.key: result for agent, result in zip(AGENTS, results)}
+    # --- Double Grounding Validation (§2.5) ---
+    validated: dict[str, dict[str, Any]] = {}
+    for agent, raw in zip(AGENTS, raw_results):
+        # Skip grounding for fallback payloads (system-generated, not LLM output)
+        if raw.get("_fallback"):
+            validated[agent.key] = {k: v for k, v in raw.items() if not k.startswith("_")}
+            continue
+        grounded = validate_findings(raw, archivist)
+        withheld = grounded.pop("withheld_count", 0)
+        if withheld:
+            logger.warning(
+                "Agent %s: %d finding(s) withheld (unsupported numbers)",
+                agent.key,
+                withheld,
+            )
+        validated[agent.key] = grounded
+
+    return validated
 
 
 async def run_board(
@@ -119,7 +144,8 @@ async def run_board(
     1. Deterministic archivist summary (no LLM).
     2. De-identify the patient record.
     3. Fire all specialist agents in parallel.
-    4. Return the raw response payload matching TDD §5 API contract.
+    4. Apply Double Grounding Validation to each result.
+    5. Return the validated response payload (TDD §5 API contract).
 
     The caller (FastAPI endpoint) awaits this directly.
     """
@@ -127,9 +153,15 @@ async def run_board(
     clinical = deidentify(patient)
     specialist_results = await run_specialists(client, clinical, archivist)
 
+    # Strip internal audit fields before sending to client
+    clean_specialists: dict[str, dict[str, Any]] = {}
+    for key, result in specialist_results.items():
+        clean = {k: v for k, v in result.items() if not k.startswith("_")}
+        clean_specialists[key] = clean
+
     return {
         "patient_id": patient.id,
         "archivist_summary": archivist.model_dump(mode="json"),
-        "specialist_results": specialist_results,
+        "specialist_results": clean_specialists,
         "data_completeness": archivist.completeness,
     }

@@ -6,6 +6,8 @@ import React, { useState, useRef, useEffect } from "react";
 /*  No API keys or system prompts exist in this file.                  */
 /* ================================================================== */
 
+const API_BASE = import.meta.env.VITE_API_URL || "";
+
 const PATIENT = {
   id: "CCP-014",
   name: "Synthetic Patient — Case CCP-014",
@@ -103,7 +105,7 @@ export default function ClinicalBoard() {
     setAuditTrail([]);
 
     try {
-      const res = await fetch("/api/board/run", {
+      const res = await fetch(`${API_BASE}/api/board/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ patient_id: PATIENT.id }),
@@ -145,7 +147,7 @@ export default function ClinicalBoard() {
     setDecision(d);
     if (sessionRef.current) {
       try {
-        await fetch("/api/board/decision", {
+        await fetch(`${API_BASE}/api/board/decision`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -165,7 +167,7 @@ export default function ClinicalBoard() {
   async function toggleAudit() {
     if (!showAudit && sessionRef.current) {
       try {
-        const res = await fetch(`/api/board/audit/${sessionRef.current}`);
+        const res = await fetch(`${API_BASE}/api/board/audit/${sessionRef.current}`);
         if (res.ok) {
           const trail = await res.json();
           const entries = [];
@@ -191,7 +193,7 @@ export default function ClinicalBoard() {
   async function exportPacket() {
     if (!sessionRef.current) return;
     try {
-      const res = await fetch(`/api/board/export/${sessionRef.current}`);
+      const res = await fetch(`${API_BASE}/api/board/export/${sessionRef.current}`);
       if (!res.ok) throw new Error("Export failed");
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);

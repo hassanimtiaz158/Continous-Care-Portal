@@ -104,6 +104,33 @@ def confidence_for(
     return max(35, min(97, round(base + adj)))
 
 
+def _annotate_findings_with_confidence(
+    result: dict[str, Any],
+    archivist: StructuredClinicalSummary,
+) -> dict[str, Any]:
+    """Add a confidence score to each individual finding in a specialist result.
+
+    Each finding's confidence is driven by:
+    - The archivist's data completeness (§2.8)
+    - The specialist's overall risk level (§2.7)
+
+    This lets the frontend display confidence per finding without
+    recomputing anything client-side.
+    """
+    risk_level = result.get("risk_level", "watch")
+    base_confidence = confidence_for(archivist, risk_level)
+
+    annotated_findings = []
+    for finding in result.get("findings", []):
+        # Findings that were withheld (grounded=False) don't get confidence
+        if finding.get("grounded") is False:
+            annotated_findings.append(finding)
+            continue
+        annotated_findings.append({**finding, "confidence": base_confidence})
+
+    return {**result, "findings": annotated_findings}
+
+
 # ---------------------------------------------------------------------------
 # Prompt builders
 # ---------------------------------------------------------------------------
@@ -302,15 +329,19 @@ async def run_board(
     # --- Board Chair Agent (§2.3) ---
     consensus = await run_chair(client, specialist_results, patient.id)
 
-    # --- Confidence Scoring (§2.7) ---
+    # --- Confidence Scoring (§2.7) — per-finding + per-agent ---
     confidence_scores: dict[str, int] = {}
+    annotated_specialists: dict[str, dict[str, Any]] = {}
     for key, result in specialist_results.items():
         risk = result.get("risk_level", "watch")
         confidence_scores[key] = confidence_for(archivist, risk)
+        annotated_specialists[key] = _annotate_findings_with_confidence(
+            result, archivist,
+        )
 
     # --- Strip internal audit fields before sending to client ---
     clean_specialists: dict[str, dict[str, Any]] = {}
-    for key, result in specialist_results.items():
+    for key, result in annotated_specialists.items():
         clean = {k: v for k, v in result.items() if not k.startswith("_")}
         clean_specialists[key] = clean
 
@@ -320,5 +351,6 @@ async def run_board(
         "specialist_results": clean_specialists,
         "consensus": consensus,
         "data_completeness": archivist.completeness,
+        "missing_fields": archivist.missing_fields,
         "confidence_scores": confidence_scores,
     }

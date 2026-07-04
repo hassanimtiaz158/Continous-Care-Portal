@@ -138,6 +138,7 @@ class TestAPIContract:
         assert "specialist_results" in result
         assert "consensus" in result
         assert "data_completeness" in result
+        assert "missing_fields" in result
         assert "confidence_scores" in result
 
     @pytest.mark.asyncio
@@ -288,6 +289,66 @@ class TestConfidenceScores:
             rule_log=[],
         )
         assert confidence_for(high, "stable") == 97  # clamped to ceiling
+
+    @pytest.mark.asyncio
+    async def test_each_finding_has_confidence(self):
+        """Every grounded finding in every specialist must carry a confidence field."""
+        client = _build_mock_client()
+        result = await run_board(CCP014, client)
+
+        for key, specialist in result["specialist_results"].items():
+            for finding in specialist.get("findings", []):
+                assert "confidence" in finding, f"{key} finding missing confidence"
+                assert isinstance(finding["confidence"], int)
+                assert 35 <= finding["confidence"] <= 97
+
+    @pytest.mark.asyncio
+    async def test_finding_confidence_matches_agent_confidence(self):
+        """Per-finding confidence must equal the per-agent confidence (same risk level)."""
+        client = _build_mock_client()
+        result = await run_board(CCP014, client)
+
+        for key in ("endocrine", "cardiology", "nephrology"):
+            agent_conf = result["confidence_scores"][key]
+            specialist = result["specialist_results"][key]
+            for finding in specialist.get("findings", []):
+                if "confidence" in finding:
+                    assert finding["confidence"] == agent_conf
+
+    @pytest.mark.asyncio
+    async def test_missing_fields_in_response(self):
+        """missing_fields must be surfaced at the top level of the response."""
+        client = _build_mock_client()
+        result = await run_board(CCP014, client)
+
+        assert "missing_fields" in result
+        assert isinstance(result["missing_fields"], list)
+        assert len(result["missing_fields"]) == 2
+        assert any("lipid" in f.lower() for f in result["missing_fields"])
+
+    @pytest.mark.asyncio
+    async def test_withheld_finding_has_no_confidence(self):
+        """Findings withheld by grounding validation should not get a confidence score."""
+        # Inject a fabricated finding that will be withheld
+        fabricated = {
+            "endocrine": {
+                "risk_level": "watch",
+                "findings": [
+                    {"text": "HbA1c at 8.6%", "metric": "hba1c"},       # grounded
+                    {"text": "HbA1c is 11.2% — critical", "metric": "hba1c"},  # fabricated
+                ],
+                "recommendation": "Adjust.",
+            },
+            "cardiology": _MOCK_SPECIALIST_RESPONSES["cardiology"],
+            "nephrology": _MOCK_SPECIALIST_RESPONSES["nephrology"],
+        }
+        client = _build_mock_client(specialist_responses=fabricated)
+        result = await run_board(CCP014, client)
+
+        findings = result["specialist_results"]["endocrine"]["findings"]
+        # Only the grounded finding should remain (withheld one removed)
+        assert len(findings) == 1
+        assert findings[0]["confidence"] > 0
 
 
 # ---------------------------------------------------------------------------

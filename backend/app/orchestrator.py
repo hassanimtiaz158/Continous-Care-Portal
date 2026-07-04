@@ -23,6 +23,7 @@ import anthropic
 
 from app.agents import AGENTS, CHAIR_SYSTEM, AgentDef
 from app.archivist import compute_archivist_summary
+from app.audit import create_session
 from app.deidentify import ClinicalPayload, deidentify
 from app.grounding import validate_findings
 from app.models import Patient, StructuredClinicalSummary
@@ -345,7 +346,17 @@ async def run_board(
         clean = {k: v for k, v in result.items() if not k.startswith("_")}
         clean_specialists[key] = clean
 
+    # --- Write audit trail (§2.10) ---
+    session_id = create_session(
+        patient_id=patient.id,
+        specialist_results=specialist_results,
+        consensus=consensus,
+        data_completeness=archivist.completeness,
+        confidence_scores=confidence_scores,
+    )
+
     return {
+        "session_id": session_id,
         "patient_id": patient.id,
         "archivist_summary": archivist.model_dump(mode="json"),
         "specialist_results": clean_specialists,

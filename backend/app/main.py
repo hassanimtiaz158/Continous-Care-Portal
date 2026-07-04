@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from app.audit import get_audit_trail, init_audit_db, record_decision
 from app.models import Patient, TimePoint, BPPoint
 from app.orchestrator import run_board, get_review_queue
 
@@ -21,6 +22,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Initialise audit database on startup
+init_audit_db()
 
 # ---------------------------------------------------------------------------
 # Patient fixture — CCP-014 synthetic record (TDD §3).
@@ -63,6 +67,14 @@ class BoardRunRequest(BaseModel):
     patient_id: str = "CCP-014"
 
 
+class BoardDecisionRequest(BaseModel):
+    session_id: str
+    decision: str  # "approved" | "edited" | "rejected"
+    edited_text: str | None = None
+    physician_note: str | None = None
+    physician_name: str | None = None
+
+
 class HealthResponse(BaseModel):
     status: str = "ok"
     anthropic_key_set: bool
@@ -97,6 +109,33 @@ async def board_run(req: BoardRunRequest):
         await client.close()
 
     return result
+
+
+@app.post("/api/board/decision")
+def board_decision(req: BoardDecisionRequest):
+    if req.decision not in ("approved", "edited", "rejected"):
+        raise HTTPException(status_code=400, detail="decision must be approved, edited, or rejected")
+
+    try:
+        audit_entry_id = record_decision(
+            session_id=req.session_id,
+            decision=req.decision,
+            edited_text=req.edited_text,
+            physician_note=req.physician_note,
+            physician_name=req.physician_name,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    return {"audit_entry_id": audit_entry_id}
+
+
+@app.get("/api/board/audit/{session_id}")
+def board_audit(session_id: str):
+    trail = get_audit_trail(session_id)
+    if trail is None:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    return trail
 
 
 @app.get("/api/review-queue")

@@ -1,10 +1,26 @@
 import os
 
+import pytest
 from fastapi.testclient import TestClient
 
+from app import audit
+from app.audit import create_session, init_audit_db
 from app.main import app
 
+
+@pytest.fixture(autouse=True)
+def _isolated_db():
+    """Each test gets a fresh in-memory SQLite database."""
+    init_audit_db(":memory:")
+    yield
+    audit.close_audit_db()
+
+
 client = TestClient(app)
+
+# ---------------------------------------------------------------------------
+# Health
+# ---------------------------------------------------------------------------
 
 
 def test_health():
@@ -15,8 +31,12 @@ def test_health():
     assert isinstance(data["anthropic_key_set"], bool)
 
 
+# ---------------------------------------------------------------------------
+# POST /api/board/run
+# ---------------------------------------------------------------------------
+
+
 def test_board_run_without_key_returns_503():
-    """Without ANTHROPIC_API_KEY the endpoint refuses to proceed."""
     key = os.environ.pop("ANTHROPIC_API_KEY", None)
     try:
         r = client.post("/api/board/run", json={"patient_id": "CCP-014"})
@@ -28,4 +48,132 @@ def test_board_run_without_key_returns_503():
 
 def test_board_run_unknown_patient_returns_404():
     r = client.post("/api/board/run", json={"patient_id": "NONEXISTENT"})
-    assert r.status_code in (404, 503)  # 503 if no key set
+    assert r.status_code in (404, 503)
+
+
+# ---------------------------------------------------------------------------
+# POST /api/board/decision
+# ---------------------------------------------------------------------------
+
+
+def test_decision_valid_approve():
+    sid = create_session(
+        patient_id="CCP-014",
+        specialist_results={
+            "endocrine": {"risk_level": "watch", "findings": [], "recommendation": "R1"},
+            "cardiology": {"risk_level": "watch", "findings": [], "recommendation": "R2"},
+            "nephrology": {"risk_level": "urgent", "findings": [], "recommendation": "R3"},
+        },
+        consensus={"joint_plan": "Plan", "priority_actions": [], "conflicts": []},
+        data_completeness=75,
+        confidence_scores={"endocrine": 82, "cardiology": 82, "nephrology": 86},
+    )
+    r = client.post("/api/board/decision", json={
+        "session_id": sid,
+        "decision": "approved",
+        "physician_name": "Dr. Test",
+    })
+    assert r.status_code == 200
+    assert r.json()["audit_entry_id"] == sid
+
+
+def test_decision_valid_edit():
+    sid = create_session(
+        patient_id="CCP-014",
+        specialist_results={
+            "endocrine": {"risk_level": "watch", "findings": [], "recommendation": "R1"},
+            "cardiology": {"risk_level": "watch", "findings": [], "recommendation": "R2"},
+            "nephrology": {"risk_level": "urgent", "findings": [], "recommendation": "R3"},
+        },
+        consensus={"joint_plan": "Plan", "priority_actions": [], "conflicts": []},
+        data_completeness=75,
+        confidence_scores={"endocrine": 82, "cardiology": 82, "nephrology": 86},
+    )
+    r = client.post("/api/board/decision", json={
+        "session_id": sid,
+        "decision": "edited",
+        "edited_text": "Modified plan.",
+        "physician_note": "Adjusted for renal function.",
+    })
+    assert r.status_code == 200
+
+
+def test_decision_invalid_value_returns_400():
+    r = client.post("/api/board/decision", json={
+        "session_id": "CCP-SESSION-fake",
+        "decision": "invalid",
+    })
+    assert r.status_code == 400
+
+
+def test_decision_nonexistent_session_returns_404():
+    r = client.post("/api/board/decision", json={
+        "session_id": "CCP-SESSION-does-not-exist",
+        "decision": "approved",
+    })
+    assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# GET /api/board/audit/{session_id}
+# ---------------------------------------------------------------------------
+
+
+def test_audit_trail_returns_data():
+    sid = create_session(
+        patient_id="CCP-014",
+        specialist_results={
+            "endocrine": {"risk_level": "watch", "findings": [], "recommendation": "R1"},
+            "cardiology": {"risk_level": "watch", "findings": [], "recommendation": "R2"},
+            "nephrology": {"risk_level": "urgent", "findings": [], "recommendation": "R3"},
+        },
+        consensus={"joint_plan": "Plan", "priority_actions": [], "conflicts": []},
+        data_completeness=75,
+        confidence_scores={"endocrine": 82, "cardiology": 82, "nephrology": 86},
+    )
+    r = client.get(f"/api/board/audit/{sid}")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["session_id"] == sid
+    assert data["patient_id"] == "CCP-014"
+    assert "agent_status" in data
+    assert "recommendations" in data
+
+
+def test_audit_trail_nonexistent_returns_404():
+    r = client.get("/api/board/audit/CCP-SESSION-does-not-exist")
+    assert r.status_code == 404
+
+
+def test_full_decision_flow():
+    """Create session → record decision → verify audit trail shows it."""
+    sid = create_session(
+        patient_id="CCP-014",
+        specialist_results={
+            "endocrine": {"risk_level": "watch", "findings": [], "recommendation": "R1"},
+            "cardiology": {"risk_level": "watch", "findings": [], "recommendation": "R2"},
+            "nephrology": {"risk_level": "urgent", "findings": [], "recommendation": "R3"},
+        },
+        consensus={"joint_plan": "Plan", "priority_actions": [], "conflicts": []},
+        data_completeness=75,
+        confidence_scores={"endocrine": 82, "cardiology": 82, "nephrology": 86},
+    )
+    # Record decision
+    r = client.post("/api/board/decision", json={
+        "session_id": sid,
+        "decision": "edited",
+        "edited_text": "Revised plan.",
+        "physician_note": "Changed dosage.",
+        "physician_name": "Dr. Reviewer",
+    })
+    assert r.status_code == 200
+
+    # Verify audit trail
+    r = client.get(f"/api/board/audit/{sid}")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["decision"] == "edited"
+    assert data["edited_text"] == "Revised plan."
+    assert data["physician_note"] == "Changed dosage."
+    assert data["physician_name"] == "Dr. Reviewer"
+    assert data["decided_at"] is not None

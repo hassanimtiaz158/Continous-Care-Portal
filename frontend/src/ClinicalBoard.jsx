@@ -1,13 +1,9 @@
-import React, { useState, useMemo, useRef } from "react";
+import React, { useState, useRef } from "react";
 
 /* ================================================================== */
 /*  CONTINUOUS CARE PORTAL — Clinical Board                            */
-/*  Phase 1 build: Archivist Agent, Evidence & Provenance,             */
-/*  Double Grounding Validation, Backend Orchestration boundary,       */
-/*  + Phase 2 seeds: Confidence Scoring, Deterministic Risk Engine,    */
-/*  Data Completeness, Structured Audit Trail.                        */
-/*                                                                      */
-/*  Synthetic patient — 12-month deterioration timeline, no real PHI  */
+/*  All AI calls go through POST /api/board/run and related endpoints. */
+/*  No API keys or system prompts exist in this file.                  */
 /* ================================================================== */
 
 const PATIENT = {
@@ -44,169 +40,14 @@ const PATIENT = {
   ],
 };
 
-const MISSING_FIELDS = ["Recent lipid panel (last drawn 6mo ago)", "Urine microalbumin confirmatory test"];
-
-function deidentify(patient) {
-  const { id, name, ...clinical } = patient;
-  return clinical;
-}
-
-function computeArchivistSummary(patient) {
-  const delta = (series) => +(series[series.length - 1].v - series[0].v).toFixed(1);
-  const trendLabel = (d) => (d > 0.05 ? "rising" : d < -0.05 ? "falling" : "stable");
-
-  const hba1cDelta = delta(patient.hba1c);
-  const egfrDelta = delta(patient.egfr);
-  const acrDelta = delta(patient.acr);
-  const ldlDelta = delta(patient.ldl);
-  const sysDelta = +(patient.bp[2].sys - patient.bp[0].sys).toFixed(0);
-  const diaDelta = +(patient.bp[2].dia - patient.bp[0].dia).toFixed(0);
-
-  const crossings = [];
-  if (patient.egfr[2].v < 60 && patient.egfr[0].v >= 60) {
-    crossings.push("eGFR crossed CKD Stage 3 threshold (<60 mL/min)");
-  }
-  if (patient.hba1c[2].v >= 8.0 && patient.hba1c[0].v < 8.0) {
-    crossings.push("HbA1c crossed 8.0% (above ADA individualized target range)");
-  }
-  if (patient.acr[2].v > 30 && patient.acr[0].v <= 30) {
-    crossings.push("ACR crossed 30 mg/g (moderately increased albuminuria)");
-  }
-
-  let points = 0;
-  const ruleLog = [];
-  if (patient.hba1c[2].v > 8.5) { points += 3; ruleLog.push("HbA1c > 8.5 → +3"); }
-  if (egfrDelta < -15) { points += 2; ruleLog.push("eGFR decline > 15 over 12mo → +2"); }
-  if (acrDelta > 40) { points += 2; ruleLog.push("ACR increase > 40 → +2"); }
-  if (sysDelta > 15) { points += 1; ruleLog.push("Systolic BP increase > 15 → +1"); }
-  const riskTier = points >= 5 ? "High" : points >= 2 ? "Moderate" : "Low";
-
-  const totalChecks = 8;
-  const completeness = Math.round(((totalChecks - MISSING_FIELDS.length) / totalChecks) * 100);
-
-  return {
-    generatedAt: new Date().toISOString(),
-    metrics: {
-      hba1c: { latest: patient.hba1c[2].v, delta: hba1cDelta, trend: trendLabel(hba1cDelta), unit: "%", history: patient.hba1c },
-      egfr: { latest: patient.egfr[2].v, delta: egfrDelta, trend: trendLabel(egfrDelta), unit: "mL/min", history: patient.egfr },
-      acr: { latest: patient.acr[2].v, delta: acrDelta, trend: trendLabel(acrDelta), unit: "mg/g", history: patient.acr },
-      ldl: { latest: patient.ldl[2].v, delta: ldlDelta, trend: trendLabel(ldlDelta), unit: "mg/dL", history: patient.ldl },
-      bp: { latestSys: patient.bp[2].sys, latestDia: patient.bp[2].dia, sysDelta, diaDelta, trend: trendLabel(sysDelta), unit: "mmHg", history: patient.bp },
-    },
-    thresholdCrossings: crossings,
-    completeness,
-    missingFields: MISSING_FIELDS,
-    riskPoints: points,
-    riskTier,
-    ruleLog,
-  };
-}
-
-const AGENTS = [
-  {
-    key: "endocrine",
-    tab: "Dr. Amara",
-    role: "Endocrinology — Glucose Control",
-    accent: "#B8823C",
-    accentSoft: "#F3E4C8",
-    metrics: ["hba1c"],
-    system:
-      "You are the Endocrinology agent on a multi-agent clinical board reviewing a chronic-disease patient with type 2 diabetes and hypertension. " +
-      "You focus ONLY on glycemic control: HbA1c trend, medication adequacy, hypoglycemia risk, and how renal or cardiac findings from colleagues should modify diabetes therapy (e.g. metformin dose limits at low eGFR). " +
-      "You do not make final decisions — you produce a specialist opinion for a human physician to review. " +
-      "Every finding you report MUST reference one of these metric keys so it can be verified against the structured record: hba1c. " +
-      "Respond with ONLY raw JSON, no markdown fences, no preamble, matching exactly: " +
-      '{"risk_level":"stable|watch|urgent","findings":[{"text":"short finding referencing a real value","metric":"hba1c"}],"recommendation":"one or two sentence recommendation"}',
-  },
-  {
-    key: "cardiology",
-    tab: "Dr. Rousseau",
-    role: "Cardiology — CV Risk",
-    accent: "#A23B3B",
-    accentSoft: "#F0D6D6",
-    metrics: ["bp", "ldl"],
-    system:
-      "You are the Cardiology agent on a multi-agent clinical board reviewing a chronic-disease patient with type 2 diabetes and hypertension. " +
-      "You focus ONLY on cardiovascular risk arising from the BP trend, LDL trend, and glycemic burden: blood pressure control, statin adequacy, and estimated risk of hypertensive or atherosclerotic complications. " +
-      "You do not make final decisions — you produce a specialist opinion for a human physician to review. " +
-      "Every finding you report MUST reference one of these metric keys so it can be verified against the structured record: bp, ldl. " +
-      "Respond with ONLY raw JSON, no markdown fences, no preamble, matching exactly: " +
-      '{"risk_level":"stable|watch|urgent","findings":[{"text":"short finding referencing a real value","metric":"bp|ldl"}],"recommendation":"one or two sentence recommendation"}',
-  },
-  {
-    key: "nephrology",
-    tab: "Dr. Osei",
-    role: "Nephrology — Kidney Function",
-    accent: "#2E6B62",
-    accentSoft: "#D3E6E1",
-    metrics: ["egfr", "acr"],
-    system:
-      "You are the Nephrology agent on a multi-agent clinical board reviewing a chronic-disease patient with type 2 diabetes and hypertension. " +
-      "You focus ONLY on renal trajectory: eGFR trend, albumin-creatinine ratio (ACR) trend, staging of diabetic kidney disease, and any nephrotoxic or renally-cleared medications that need dose adjustment. " +
-      "You do not make final decisions — you produce a specialist opinion for a human physician to review. " +
-      "Every finding you report MUST reference one of these metric keys so it can be verified against the structured record: egfr, acr. " +
-      "Respond with ONLY raw JSON, no markdown fences, no preamble, matching exactly: " +
-      '{"risk_level":"stable|watch|urgent","findings":[{"text":"short finding referencing a real value","metric":"egfr|acr"}],"recommendation":"one or two sentence recommendation"}',
-  },
+const AGENT_META = [
+  { key: "endocrine", tab: "Dr. Amara", role: "Endocrinology — Glucose Control", accent: "#B8823C", accentSoft: "#F3E4C8" },
+  { key: "cardiology", tab: "Dr. Rousseau", role: "Cardiology — CV Risk", accent: "#A23B3B", accentSoft: "#F0D6D6" },
+  { key: "nephrology", tab: "Dr. Osei", role: "Nephrology — Kidney Function", accent: "#2E6B62", accentSoft: "#D3E6E1" },
 ];
-
-const CHAIR_SYSTEM =
-  "You are the Board Chair synthesizing three specialist opinions (endocrinology, cardiology, nephrology) into one joint plan for a patient with type 2 diabetes and hypertension. " +
-  "Note any place where specialists' recommendations conflict (e.g. a cardiology drug choice that nephrology would need to dose-adjust). " +
-  "This joint plan is a DRAFT for a human physician to approve, edit, or reject — it is not a final order. " +
-  "Respond with ONLY raw JSON, no markdown fences, no preamble, matching exactly: " +
-  '{"joint_plan":"2-3 sentence synthesized plan","priority_actions":["action 1","action 2","action 3"],"conflicts":["conflict 1"]}' +
-  " (conflicts can be an empty array if there are none).";
 
 const RISK_LABEL = { stable: "Stable", watch: "Watch", urgent: "Urgent" };
 const RISK_COLOR = { stable: "#3F6B4F", watch: "#B8823C", urgent: "#A23B3B" };
-
-async function askAgent(system, userContent) {
-  const response = await fetch("/api/board/run", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ system, userContent }),
-  });
-  const data = await response.json();
-  return data;
-}
-
-function extractNumbers(text) {
-  const matches = text.match(/-?\d+(\.\d+)?/g) || [];
-  return matches.map(Number);
-}
-
-function knownValuesForMetric(metric, archivist) {
-  const m = archivist.metrics[metric === "bp" ? "bp" : metric];
-  if (!m) return [];
-  if (metric === "bp") {
-    return [m.latestSys, m.latestDia, Math.abs(m.sysDelta), Math.abs(m.diaDelta), ...m.history.flatMap((h) => [h.sys, h.dia])];
-  }
-  return [m.latest, Math.abs(m.delta), ...m.history.map((h) => h.v)];
-}
-
-function validateFinding(finding, archivist) {
-  if (!finding || !finding.metric || !archivist.metrics[finding.metric === "bp" ? "bp" : finding.metric]) {
-    return { ...finding, grounded: false, evidence: null };
-  }
-  const nums = extractNumbers(finding.text || "");
-  const known = knownValuesForMetric(finding.metric, archivist);
-  const tolerance = 0.6;
-  const unsupported = nums.filter((n) => !known.some((k) => Math.abs(k - n) <= tolerance));
-  const grounded = unsupported.length === 0;
-  const m = archivist.metrics[finding.metric === "bp" ? "bp" : finding.metric];
-  const evidence =
-    finding.metric === "bp"
-      ? { sourceValues: m.history.map((h) => `${h.t}: ${h.sys}/${h.dia}`), method: "Δ vs. earliest reading", date: "Now" }
-      : { sourceValues: m.history.map((h) => `${h.t}: ${h.v}${m.unit}`), method: "Δ vs. earliest reading", date: "Now" };
-  return { ...finding, grounded, evidence, unsupportedValues: unsupported };
-}
-
-function confidenceFor(archivist, riskLevel) {
-  const base = 40 + archivist.completeness * 0.55;
-  const adj = riskLevel === "urgent" ? 4 : riskLevel === "watch" ? 0 : 6;
-  return Math.max(35, Math.min(97, Math.round(base + adj)));
-}
 
 function Sparkline({ points, color }) {
   const vals = points.map((p) => p.v ?? p.sys);
@@ -243,105 +84,99 @@ export default function ClinicalBoard() {
   const [timing, setTiming] = useState(null);
   const sessionRef = useRef(null);
 
-  const clinicalOnly = useMemo(() => deidentify(PATIENT), []);
-
-  function logAudit(entry) {
-    setAuditTrail((prev) => [...prev, { ts: new Date().toISOString(), ...entry }]);
-  }
-
   async function runBoard() {
     const start = performance.now();
-    const sessionId = `CCP-SESSION-${Date.now()}`;
-    sessionRef.current = sessionId;
-    setStatus("archiving");
+    setStatus("running");
     setErrMsg(null);
     setConsensus(null);
     setDecision(null);
     setEditing(false);
     setNote("");
     setTiming(null);
-
-    const summary = computeArchivistSummary(PATIENT);
-    setArchivist(summary);
-    logAudit({ sessionId, event: "archivist_computed", completeness: summary.completeness, riskTier: summary.riskTier });
-
-    setStatus("running");
-    const loading = {};
-    AGENTS.forEach((a) => (loading[a.key] = { loading: true }));
-    setResults(loading);
+    setAuditTrail([]);
 
     try {
-      const patientSummary = JSON.stringify(clinicalOnly, null, 2);
-      const archivistBrief = JSON.stringify(summary.metrics, null, 2);
-
-      const settled = await Promise.allSettled(
-        AGENTS.map((a) =>
-          askAgent(
-            a.system,
-            `De-identified clinical record:\n${patientSummary}\n\nArchivist's computed trends (use these numbers — do not recompute):\n${archivistBrief}\n\nGive your specialist opinion.`
-          )
-        )
-      );
-
-      const next = {};
-      settled.forEach((r, i) => {
-        const key = AGENTS[i].key;
-        if (r.status === "fulfilled") {
-          const val = r.value;
-          const validated = (val.findings || []).map((f) => validateFinding(f, summary));
-          const withheld = validated.filter((f) => !f.grounded).length;
-          if (withheld > 0) {
-            logAudit({ sessionId, event: "finding_withheld", agent: key, count: withheld });
-          }
-          next[key] = {
-            risk_level: val.risk_level,
-            findings: validated,
-            recommendation: val.recommendation,
-            confidence: confidenceFor(summary, val.risk_level),
-          };
-        } else {
-          next[key] = {
-            risk_level: "watch",
-            findings: [{ text: "Agent response unavailable.", grounded: true, evidence: null, fallback: true }],
-            recommendation: "Retry the board. Raw archivist data remains available below.",
-            confidence: null,
-            failed: true,
-          };
-          logAudit({ sessionId, event: "agent_failed", agent: key });
-        }
+      const res = await fetch("/api/board/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ patient_id: PATIENT.id }),
       });
-      setResults(next);
-      setStatus("synthesizing");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `Board request failed (${res.status})`);
+      }
+      const data = await res.json();
 
-      const chairInput = `Patient record:\n${patientSummary}\n\nSpecialist opinions:\n${JSON.stringify(
-        Object.fromEntries(Object.entries(next).map(([k, v]) => [k, { risk_level: v.risk_level, findings: v.findings.map((f) => f.text), recommendation: v.recommendation }])),
-        null,
-        2
-      )}`;
-      const chairResult = await askAgent(CHAIR_SYSTEM, chairInput);
-      setConsensus(chairResult);
-      setEditText(chairResult.joint_plan || "");
+      sessionRef.current = data.session_id;
+      setArchivist(data.archivist_summary);
+      setConsensus(data.consensus);
+
+      const combinedConfidence = data.confidence_scores || {};
+      const next = {};
+      for (const meta of AGENT_META) {
+        const r = data.specialist_results[meta.key];
+        if (r) {
+          next[meta.key] = {
+            ...r,
+            confidence: combinedConfidence[meta.key] ?? null,
+          };
+        }
+      }
+      setResults(next);
+      setEditText(data.consensus?.joint_plan || "");
       setStatus("done");
-      const elapsed = ((performance.now() - start) / 1000).toFixed(1);
-      setTiming(elapsed);
-      logAudit({ sessionId, event: "board_complete", elapsedSeconds: elapsed });
+      setTiming(((performance.now() - start) / 1000).toFixed(1));
     } catch (e) {
-      setErrMsg("The board could not complete. Please try again.");
+      setErrMsg(e.message || "The board could not complete. Please try again.");
       setStatus("error");
-      logAudit({ sessionId, event: "board_error", message: String(e) });
     }
   }
 
-  function recordDecision(d) {
+  async function recordDecision(d) {
     setDecision(d);
-    logAudit({
-      sessionId: sessionRef.current,
-      event: "physician_decision",
-      decision: d,
-      physician: physician || "reviewing physician",
-      note: note || null,
-      finalText: d === "edited" ? editText : consensus?.joint_plan,
-    });
+    if (sessionRef.current) {
+      try {
+        await fetch("/api/board/decision", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session_id: sessionRef.current,
+            decision: d,
+            edited_text: d === "edited" ? editText : undefined,
+            physician_note: note || undefined,
+            physician_name: physician || undefined,
+          }),
+        });
+      } catch {
+        // Decision recorded locally even if backend call fails
+      }
+    }
+  }
+
+  async function toggleAudit() {
+    if (!showAudit && sessionRef.current) {
+      try {
+        const res = await fetch(`/api/board/audit/${sessionRef.current}`);
+        if (res.ok) {
+          const trail = await res.json();
+          const entries = [];
+          entries.push({ ts: trail.created_at, event: "session_created", patient_id: trail.patient_id });
+          for (const [agent, status] of Object.entries(trail.agent_status || {})) {
+            entries.push({ ts: trail.created_at, event: `agent_${status}`, agent });
+          }
+          if (trail.data_completeness != null) {
+            entries.push({ ts: trail.created_at, event: "data_completeness", value: trail.data_completeness });
+          }
+          if (trail.decision) {
+            entries.push({ ts: trail.decided_at, event: "physician_decision", decision: trail.decision, physician: trail.physician_name });
+          }
+          setAuditTrail(entries);
+        }
+      } catch {
+        // Keep existing trail on error
+      }
+    }
+    setShowAudit((s) => !s);
   }
 
   function exportPacket() {
@@ -397,19 +232,17 @@ export default function ClinicalBoard() {
       <div style={styles.controlRow}>
         <button
           onClick={runBoard}
-          disabled={status === "archiving" || status === "running" || status === "synthesizing"}
-          style={{ ...styles.runButton, opacity: ["archiving", "running", "synthesizing"].includes(status) ? 0.6 : 1 }}
+          disabled={status === "running"}
+          style={{ ...styles.runButton, opacity: status === "running" ? 0.6 : 1 }}
         >
           {status === "idle" && "Convene the board"}
-          {status === "archiving" && "Archivist computing trends…"}
-          {status === "running" && "Specialists reviewing…"}
-          {status === "synthesizing" && "Chair is synthesizing…"}
+          {status === "running" && "Board reviewing…"}
           {(status === "done" || status === "error") && "Re-run the board"}
         </button>
         {timing && <div style={styles.timingNote}>Board response time: {timing}s</div>}
         {errMsg && <div style={styles.errText}>{errMsg}</div>}
         {auditTrail.length > 0 && (
-          <button style={styles.linkButton} onClick={() => setShowAudit((s) => !s)}>
+          <button style={styles.linkButton} onClick={toggleAudit}>
             {showAudit ? "Hide audit trail" : `View audit trail (${auditTrail.length})`}
           </button>
         )}
@@ -420,14 +253,14 @@ export default function ClinicalBoard() {
           <div style={styles.archivistHeader}>Archivist Agent — deterministic, no model involved</div>
           <div style={styles.archivistRow}>
             <span>Data completeness: <b>{archivist.completeness}%</b></span>
-            <span>Risk points: <b>{archivist.riskPoints}</b> → <b>{archivist.riskTier}</b> tier</span>
+            <span>Risk points: <b>{archivist.risk_points}</b> → <b>{archivist.risk_tier}</b> tier</span>
           </div>
-          {archivist.missingFields.length > 0 && (
-            <div style={styles.archivistMissing}>Missing: {archivist.missingFields.join(" · ")}</div>
+          {archivist.missing_fields && archivist.missing_fields.length > 0 && (
+            <div style={styles.archivistMissing}>Missing: {archivist.missing_fields.join(" · ")}</div>
           )}
-          {archivist.thresholdCrossings.length > 0 && (
+          {archivist.threshold_crossings && archivist.threshold_crossings.length > 0 && (
             <ul style={styles.archivistList}>
-              {archivist.thresholdCrossings.map((c, i) => (
+              {archivist.threshold_crossings.map((c, i) => (
                 <li key={i} style={styles.archivistListItem}>⚑ {c}</li>
               ))}
             </ul>
@@ -439,7 +272,7 @@ export default function ClinicalBoard() {
         <div style={styles.auditBox}>
           {auditTrail.map((e, i) => (
             <div key={i} style={styles.auditLine}>
-              <span style={styles.auditTs}>{e.ts.slice(11, 19)}</span> {e.event}
+              <span style={styles.auditTs}>{e.ts ? new Date(e.ts).toLocaleTimeString() : ""}</span> {e.event}
               {Object.entries(e)
                 .filter(([k]) => !["ts", "event"].includes(k))
                 .map(([k, v]) => ` · ${k}=${typeof v === "object" ? JSON.stringify(v) : v}`)
@@ -450,7 +283,7 @@ export default function ClinicalBoard() {
       )}
 
       <div className="tabs-row" style={styles.tabsRow}>
-        {AGENTS.map((a) => (
+        {AGENT_META.map((a) => (
           <AgentTab key={a.key} agent={a} result={results[a.key]} />
         ))}
       </div>
@@ -551,7 +384,7 @@ function TrendCell({ label, unit, points, color, last }) {
 }
 
 function AgentTab({ agent, result }) {
-  const loading = !result || result.loading;
+  const loading = !result;
   return (
     <div style={{ ...styles.tab, borderTop: `4px solid ${agent.accent}` }}>
       <div style={styles.tabHeader}>
@@ -562,10 +395,9 @@ function AgentTab({ agent, result }) {
         </div>
       </div>
 
-      {loading && result === undefined && <div style={styles.tabIdle}>Awaiting board session</div>}
-      {loading && result && result.loading && <div style={styles.tabLoading}>Reviewing patient record…</div>}
+      {loading && <div style={styles.tabIdle}>Awaiting board session</div>}
 
-      {result && !result.loading && (
+      {result && (
         <>
           <div style={styles.badgeRow}>
             <div
@@ -653,7 +485,6 @@ const styles = {
   tabName: { fontFamily: "Georgia, serif", fontSize: 15, fontWeight: 700 },
   tabRole: { fontSize: 11, color: "#6B6152" },
   tabIdle: { fontSize: 13, color: "#9A917E", fontStyle: "italic" },
-  tabLoading: { fontSize: 13, color: "#6B6152" },
   badgeRow: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 },
   riskBadge: { display: "inline-block", fontSize: 11, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", padding: "3px 9px", borderRadius: 3 },
   confBadge: { display: "inline-block", fontSize: 11, fontFamily: "'Courier New', monospace", color: "#4A4436", background: "#EFE9D6", padding: "3px 9px", borderRadius: 3 },

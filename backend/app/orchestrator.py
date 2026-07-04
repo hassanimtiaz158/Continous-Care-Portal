@@ -6,7 +6,8 @@ an API key or a raw system prompt.
 
 Flow:
   Patient → Archivist (deterministic) → De-identify → Specialist Agents
-  (parallel, return_exceptions=True) → Double Grounding Validation → response
+  (parallel, return_exceptions=True) → Double Grounding Validation →
+  Board Chair Agent (synthesis) → Confidence Scoring → response
 """
 
 from __future__ import annotations
@@ -14,11 +15,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 import anthropic
 
-from app.agents import AGENTS, AgentDef
+from app.agents import AGENTS, CHAIR_SYSTEM, AgentDef
 from app.archivist import compute_archivist_summary
 from app.deidentify import ClinicalPayload, deidentify
 from app.grounding import validate_findings
@@ -26,8 +29,10 @@ from app.models import Patient, StructuredClinicalSummary
 
 logger = logging.getLogger(__name__)
 
-# Fallback when an agent fails — patient never disappears from the UI.
-# Marked with _fallback=True so grounding validation skips it.
+# ---------------------------------------------------------------------------
+# Fallback payloads — patient never disappears from the UI (TDD §2.6)
+# ---------------------------------------------------------------------------
+
 _AGENT_FAILURE_PAYLOAD: dict[str, Any] = {
     "risk_level": "watch",
     "findings": [
@@ -37,8 +42,73 @@ _AGENT_FAILURE_PAYLOAD: dict[str, Any] = {
     "_fallback": True,
 }
 
+_CHAIR_FAILURE_PAYLOAD: dict[str, Any] = {
+    "joint_plan": "Board Chair agent unavailable. Specialist opinions are displayed above for manual review.",
+    "priority_actions": [
+        "Review individual specialist opinions above.",
+        "Retry the board for a synthesized plan.",
+    ],
+    "conflicts": [],
+    "_fallback": True,
+}
 
-def _build_prompt(
+# ---------------------------------------------------------------------------
+# Manual review queue — TDD §2.6
+# In production this would be a database table; for the hackathon an
+# in-memory list suffices.  Each entry is created when an agent fails.
+# ---------------------------------------------------------------------------
+
+_manual_review_queue: list[dict[str, Any]] = []
+
+
+def get_review_queue() -> list[dict[str, Any]]:
+    """Return a snapshot of the current manual review queue."""
+    return list(_manual_review_queue)
+
+
+def _enqueue_review(
+    patient_id: str,
+    agent_key: str,
+    error: str,
+) -> str:
+    """Create a manual review queue entry and return its ID."""
+    entry_id = f"REVIEW-{uuid.uuid4().hex[:8]}"
+    entry = {
+        "id": entry_id,
+        "patient_id": patient_id,
+        "agent_key": agent_key,
+        "error": error,
+        "queued_at": datetime.now(timezone.utc).isoformat(),
+        "status": "pending",
+    }
+    _manual_review_queue.append(entry)
+    logger.warning("Manual review queue: %s", entry)
+    return entry_id
+
+
+# ---------------------------------------------------------------------------
+# Confidence Scoring — TDD §2.7, ported from ClinicalBoard.jsx §2.7
+# ---------------------------------------------------------------------------
+
+def confidence_for(
+    archivist: StructuredClinicalSummary,
+    risk_level: str,
+) -> int:
+    """Compute a numeric confidence percentage driven by data completeness.
+
+    Base = 40 + completeness * 0.55, adjusted by risk tier.
+    Clamped to [35, 97].
+    """
+    base = 40 + archivist.completeness * 0.55
+    adj = {"urgent": 4, "watch": 0, "stable": 6}.get(risk_level, 0)
+    return max(35, min(97, round(base + adj)))
+
+
+# ---------------------------------------------------------------------------
+# Prompt builders
+# ---------------------------------------------------------------------------
+
+def _build_specialist_prompt(
     clinical: ClinicalPayload,
     archivist: StructuredClinicalSummary,
 ) -> str:
@@ -55,6 +125,37 @@ def _build_prompt(
         f"Give your specialist opinion."
     )
 
+
+def _build_chair_prompt(
+    specialist_results: dict[str, dict[str, Any]],
+) -> str:
+    """Compose the user message for the Board Chair agent.
+
+    Input: patient record summary + JSON of all three specialist results
+    (TDD §2.3).
+    """
+    specialist_summary = json.dumps(
+        {
+            k: {
+                "risk_level": v.get("risk_level"),
+                "findings": [
+                    f.get("text", "") for f in v.get("findings", [])
+                ],
+                "recommendation": v.get("recommendation"),
+            }
+            for k, v in specialist_results.items()
+        },
+        indent=2,
+    )
+    return (
+        f"Specialist opinions from the clinical board:\n{specialist_summary}\n\n"
+        f"Synthesize these into one joint plan for the physician."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Agent communication
+# ---------------------------------------------------------------------------
 
 def _parse_agent_response(raw: str) -> dict[str, Any]:
     """Strip markdown fences and parse JSON from an agent response."""
@@ -85,31 +186,48 @@ async def _call_agent(
     return _parse_agent_response(raw)
 
 
+async def _call_chair(
+    client: anthropic.AsyncAnthropic,
+    user_content: str,
+) -> dict[str, Any]:
+    """Call the Board Chair agent and return its parsed JSON response."""
+    message = await client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=1000,
+        system=CHAIR_SYSTEM,
+        messages=[{"role": "user", "content": user_content}],
+    )
+    raw = "".join(
+        block.text for block in message.content if block.type == "text"
+    )
+    return _parse_agent_response(raw)
+
+
+# ---------------------------------------------------------------------------
+# Specialist orchestration
+# ---------------------------------------------------------------------------
+
 async def run_specialists(
     client: anthropic.AsyncAnthropic,
     clinical: ClinicalPayload,
     archivist: StructuredClinicalSummary,
+    patient_id: str,
 ) -> dict[str, dict[str, Any]]:
     """Call all specialist agents in parallel, then apply Double Grounding.
 
     Uses asyncio.gather(return_exceptions=True) so one agent failure
     does not kill the others — TDD §2.6 AI Failure Handling.
 
-    After all agents respond, each result passes through grounding
-    validation (TDD §2.5): every numeric claim is verified against
-    the Archivist's structured values.  Unsupported findings are
-    withheld from the API response.
-
-    Returns a dict keyed by agent key, each value is the validated
-    specialist result.
+    Failed agents get the fallback payload AND a manual review queue entry.
     """
-    user_content = _build_prompt(clinical, archivist)
+    user_content = _build_specialist_prompt(clinical, archivist)
 
     async def _safe_call(agent: AgentDef) -> dict[str, Any]:
         try:
             return await _call_agent(client, agent, user_content)
-        except Exception:
+        except Exception as exc:
             logger.exception("Agent %s failed", agent.key)
+            _enqueue_review(patient_id, agent.key, str(exc))
             return dict(_AGENT_FAILURE_PAYLOAD)
 
     tasks = [_safe_call(agent) for agent in AGENTS]
@@ -118,7 +236,6 @@ async def run_specialists(
     # --- Double Grounding Validation (§2.5) ---
     validated: dict[str, dict[str, Any]] = {}
     for agent, raw in zip(AGENTS, raw_results):
-        # Skip grounding for fallback payloads (system-generated, not LLM output)
         if raw.get("_fallback"):
             validated[agent.key] = {k: v for k, v in raw.items() if not k.startswith("_")}
             continue
@@ -135,25 +252,63 @@ async def run_specialists(
     return validated
 
 
+# ---------------------------------------------------------------------------
+# Board Chair orchestration
+# ---------------------------------------------------------------------------
+
+async def run_chair(
+    client: anthropic.AsyncAnthropic,
+    specialist_results: dict[str, dict[str, Any]],
+    patient_id: str,
+) -> dict[str, Any]:
+    """Call the Board Chair agent for synthesis.
+
+    If the Chair fails, a fallback consensus is returned and a manual
+    review queue entry is created — the patient never disappears.
+    """
+    user_content = _build_chair_prompt(specialist_results)
+    try:
+        result = await _call_chair(client, user_content)
+        # Strip any internal flags before returning
+        return {k: v for k, v in result.items() if not k.startswith("_")}
+    except Exception as exc:
+        logger.exception("Board Chair agent failed")
+        _enqueue_review(patient_id, "chair", str(exc))
+        return {k: v for k, v in _CHAIR_FAILURE_PAYLOAD.items() if not k.startswith("_")}
+
+
+# ---------------------------------------------------------------------------
+# Top-level orchestrator
+# ---------------------------------------------------------------------------
+
 async def run_board(
     patient: Patient,
     client: anthropic.AsyncAnthropic,
 ) -> dict[str, Any]:
-    """Top-level async orchestrator.
+    """Top-level async orchestrator — full TDD §5 response shape.
 
     1. Deterministic archivist summary (no LLM).
     2. De-identify the patient record.
     3. Fire all specialist agents in parallel.
     4. Apply Double Grounding Validation to each result.
-    5. Return the validated response payload (TDD §5 API contract).
-
-    The caller (FastAPI endpoint) awaits this directly.
+    5. Call Board Chair for synthesis.
+    6. Compute confidence scores per specialist.
+    7. Return the full validated response payload.
     """
     archivist = compute_archivist_summary(patient)
     clinical = deidentify(patient)
-    specialist_results = await run_specialists(client, clinical, archivist)
+    specialist_results = await run_specialists(client, clinical, archivist, patient.id)
 
-    # Strip internal audit fields before sending to client
+    # --- Board Chair Agent (§2.3) ---
+    consensus = await run_chair(client, specialist_results, patient.id)
+
+    # --- Confidence Scoring (§2.7) ---
+    confidence_scores: dict[str, int] = {}
+    for key, result in specialist_results.items():
+        risk = result.get("risk_level", "watch")
+        confidence_scores[key] = confidence_for(archivist, risk)
+
+    # --- Strip internal audit fields before sending to client ---
     clean_specialists: dict[str, dict[str, Any]] = {}
     for key, result in specialist_results.items():
         clean = {k: v for k, v in result.items() if not k.startswith("_")}
@@ -163,5 +318,7 @@ async def run_board(
         "patient_id": patient.id,
         "archivist_summary": archivist.model_dump(mode="json"),
         "specialist_results": clean_specialists,
+        "consensus": consensus,
         "data_completeness": archivist.completeness,
+        "confidence_scores": confidence_scores,
     }

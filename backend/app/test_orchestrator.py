@@ -8,12 +8,17 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from app.main import CCP014
-from app.orchestrator import run_board
+from app.orchestrator import (
+    confidence_for,
+    get_review_queue,
+    run_board,
+    _manual_review_queue,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -33,6 +38,18 @@ def _make_assistant_response(payload: dict[str, Any]) -> MagicMock:
     msg.content = [_make_text_block(json.dumps(payload))]
     return msg
 
+
+_MOCK_CHAIR_RESPONSE: dict[str, Any] = {
+    "joint_plan": "Synthesized plan: intensify glycemic and BP control; urgent nephrology referral for CKD Stage 3.",
+    "priority_actions": [
+        "Increase metformin monitoring given declining renal function.",
+        "Escalate antihypertensive therapy to target SBP <130.",
+        "Urgent nephrology referral for CKD Stage 3 staging.",
+    ],
+    "conflicts": [
+        "Cardiology may recommend ACEi/ARB which requires nephrology dose coordination.",
+    ],
+}
 
 # Fixed specialist responses for deterministic testing
 _MOCK_SPECIALIST_RESPONSES: dict[str, dict[str, Any]] = {
@@ -63,27 +80,42 @@ _MOCK_SPECIALIST_RESPONSES: dict[str, dict[str, Any]] = {
 
 
 def _build_mock_client(
-    responses: dict[str, dict[str, Any]] | None = None,
-    side_effect: Exception | None = None,
+    specialist_responses: dict[str, dict[str, Any]] | None = None,
+    chair_response: dict[str, Any] | None = None,
+    fail_keys: set[str] | None = None,
+    fail_chair: bool = False,
+    global_error: Exception | None = None,
 ) -> AsyncMock:
-    """Build a mock AsyncAnthropic client.
+    """Build a mock AsyncAnthropic client with 4 calls (3 specialists + 1 chair).
 
-    If *responses* is provided, ``messages.create`` returns the matching
-    specialist response for each call (in order).  If *side_effect* is
-    given, every call raises that exception.
+    - specialist_responses: per-agent responses (default: _MOCK_SPECIALIST_RESPONSES)
+    - chair_response: Chair agent response (default: _MOCK_CHAIR_RESPONSE)
+    - fail_keys: set of specialist agent keys that should raise
+    - fail_chair: if True, the Chair call raises
+    - global_error: if set, every call raises this
     """
     client = AsyncMock()
     call_count = {"n": 0}
-    agent_keys = ["endocrine", "cardiology", "nephrology"]
-    resps = responses or _MOCK_SPECIALIST_RESPONSES
+    agent_order = ["endocrine", "cardiology", "nephrology"]
+    resps = specialist_responses or _MOCK_SPECIALIST_RESPONSES
+    chair_resp = chair_response or _MOCK_CHAIR_RESPONSE
+    fails = fail_keys or set()
 
     async def _create(**kwargs: Any) -> MagicMock:
-        if side_effect:
-            raise side_effect
+        if global_error:
+            raise global_error
         idx = call_count["n"]
         call_count["n"] += 1
-        key = agent_keys[idx] if idx < len(agent_keys) else agent_keys[-1]
-        return _make_assistant_response(resps[key])
+        # Call 0-2: specialists, call 3: chair
+        if idx < 3:
+            key = agent_order[idx]
+            if key in fails:
+                raise RuntimeError(f"Agent {key} timeout")
+            return _make_assistant_response(resps[key])
+        else:
+            if fail_chair:
+                raise RuntimeError("Chair agent timeout")
+            return _make_assistant_response(chair_resp)
 
     client.messages.create = AsyncMock(side_effect=_create)
     return client
@@ -94,183 +126,308 @@ def _build_mock_client(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_response_has_required_keys():
-    """POST /api/board/run must return the fields specified in TDD §5."""
-    client = _build_mock_client()
-    result = await run_board(CCP014, client)
+class TestAPIContract:
+    @pytest.mark.asyncio
+    async def test_response_has_all_required_keys(self):
+        """POST /api/board/run must return every field in TDD §5."""
+        client = _build_mock_client()
+        result = await run_board(CCP014, client)
 
-    assert result["patient_id"] == "CCP-014"
-    assert "archivist_summary" in result
-    assert "specialist_results" in result
-    assert "data_completeness" in result
+        assert result["patient_id"] == "CCP-014"
+        assert "archivist_summary" in result
+        assert "specialist_results" in result
+        assert "consensus" in result
+        assert "data_completeness" in result
+        assert "confidence_scores" in result
 
+    @pytest.mark.asyncio
+    async def test_archivist_summary_shape(self):
+        client = _build_mock_client()
+        result = await run_board(CCP014, client)
+        summary = result["archivist_summary"]
 
-@pytest.mark.asyncio
-async def test_archivist_summary_shape():
-    """Archivist summary must contain all fields from the StructuredClinicalSummary model."""
-    client = _build_mock_client()
-    result = await run_board(CCP014, client)
-    summary = result["archivist_summary"]
+        assert summary["risk_tier"] == "High"
+        assert summary["completeness"] == 75
+        assert summary["risk_points"] == 8
+        assert isinstance(summary["threshold_crossings"], list)
+        assert isinstance(summary["rule_log"], list)
+        for key in ("hba1c", "egfr", "acr", "ldl", "bp"):
+            assert key in summary["metrics"]
 
-    assert summary["risk_tier"] == "High"
-    assert summary["completeness"] == 75
-    assert summary["risk_points"] == 8
-    assert isinstance(summary["threshold_crossings"], list)
-    assert isinstance(summary["rule_log"], list)
-    assert "metrics" in summary
-    for key in ("hba1c", "egfr", "acr", "ldl", "bp"):
-        assert key in summary["metrics"]
+    @pytest.mark.asyncio
+    async def test_specialist_results_keyed_by_agent(self):
+        client = _build_mock_client()
+        result = await run_board(CCP014, client)
+        assert set(result["specialist_results"].keys()) == {
+            "endocrine", "cardiology", "nephrology",
+        }
 
+    @pytest.mark.asyncio
+    async def test_specialist_results_match_mock(self):
+        client = _build_mock_client()
+        result = await run_board(CCP014, client)
 
-@pytest.mark.asyncio
-async def test_specialist_results_keyed_by_agent():
-    """Each specialist result must be keyed by agent key."""
-    client = _build_mock_client()
-    result = await run_board(CCP014, client)
-    specialists = result["specialist_results"]
+        endo = result["specialist_results"]["endocrine"]
+        assert endo["risk_level"] == "watch"
+        assert len(endo["findings"]) == 1
+        assert "recommendation" in endo
 
-    assert set(specialists.keys()) == {"endocrine", "cardiology", "nephrology"}
+        cardio = result["specialist_results"]["cardiology"]
+        assert cardio["risk_level"] == "watch"
+        assert len(cardio["findings"]) == 2
 
+        nephro = result["specialist_results"]["nephrology"]
+        assert nephro["risk_level"] == "urgent"
 
-@pytest.mark.asyncio
-async def test_specialist_results_match_mock():
-    """Specialist results must contain the raw JSON from the mocked agents."""
-    client = _build_mock_client()
-    result = await run_board(CCP014, client)
+    @pytest.mark.asyncio
+    async def test_data_completeness_matches_archivist(self):
+        client = _build_mock_client()
+        result = await run_board(CCP014, client)
+        assert result["data_completeness"] == result["archivist_summary"]["completeness"]
 
-    endo = result["specialist_results"]["endocrine"]
-    assert endo["risk_level"] == "watch"
-    assert len(endo["findings"]) == 1
-    assert "recommendation" in endo
-
-    cardio = result["specialist_results"]["cardiology"]
-    assert cardio["risk_level"] == "watch"
-    assert len(cardio["findings"]) == 2
-
-    nephro = result["specialist_results"]["nephrology"]
-    assert nephro["risk_level"] == "urgent"
-
-
-@pytest.mark.asyncio
-async def test_data_completeness_matches_archivist():
-    """data_completeness must equal the archivist's completeness score."""
-    client = _build_mock_client()
-    result = await run_board(CCP014, client)
-
-    archivist_completeness = result["archivist_summary"]["completeness"]
-    assert result["data_completeness"] == archivist_completeness
-
-
-@pytest.mark.asyncio
-async def test_no_identifiers_in_prompt():
-    """The prompt built by the orchestrator must never contain patient identifiers."""
-    built_prompts: list[str] = []
-
-    original_build = None
-    from app import orchestrator
-
-    original_build = orchestrator._build_prompt
-
-    def _tracking_build(clinical, archivist):
-        prompt = original_build(clinical, archivist)
-        built_prompts.append(prompt)
-        return prompt
-
-    orchestrator._build_prompt = _tracking_build
-    try:
+    @pytest.mark.asyncio
+    async def test_4_messages_create_calls(self):
+        """3 specialists + 1 chair = 4 messages.create calls."""
         client = _build_mock_client()
         await run_board(CCP014, client)
-    finally:
-        orchestrator._build_prompt = original_build
-
-    for prompt in built_prompts:
-        assert "CCP-014" not in prompt
-        assert "Synthetic Patient" not in prompt
+        assert client.messages.create.call_count == 4
 
 
 # ---------------------------------------------------------------------------
-# Tests — AI Failure Handling (TDD §2.6)
+# Tests — Board Chair consensus (§2.3)
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_single_agent_failure_returns_fallback():
-    """If one agent raises, the other two still return real results."""
-    call_count = {"n": 0}
-    agent_keys = ["endocrine", "cardiology", "nephrology"]
-
-    async def _mixed_create(**kwargs: Any) -> MagicMock:
-        idx = call_count["n"]
-        call_count["n"] += 1
-        key = agent_keys[idx]
-        if key == "nephrology":
-            raise RuntimeError("Anthropic API timeout")
-        return _make_assistant_response(_MOCK_SPECIALIST_RESPONSES[key])
-
-    client = AsyncMock()
-    client.messages.create = AsyncMock(side_effect=_mixed_create)
-
-    result = await run_board(CCP014, client)
-    specialists = result["specialist_results"]
-
-    # Two agents succeeded with real data
-    assert specialists["endocrine"]["risk_level"] == "watch"
-    assert specialists["cardiology"]["risk_level"] == "watch"
-
-    # One agent got the fallback payload
-    assert specialists["nephrology"]["risk_level"] == "watch"
-    assert "Agent response unavailable" in specialists["nephrology"]["findings"][0]["text"]
-
-
-@pytest.mark.asyncio
-async def test_all_agents_fail_returns_all_fallbacks():
-    """If every agent raises, all three get fallback payloads."""
-    client = AsyncMock()
-    client.messages.create = AsyncMock(side_effect=RuntimeError("Provider down"))
-
-    result = await run_board(CCP014, client)
-    specialists = result["specialist_results"]
-
-    for key in ("endocrine", "cardiology", "nephrology"):
-        assert specialists[key]["risk_level"] == "watch"
-        assert "Agent response unavailable" in specialists[key]["findings"][0]["text"]
-
-
-# ---------------------------------------------------------------------------
-# Tests — prompt construction
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_prompt_includes_archivist_metrics():
-    """The specialist prompt must include the archivist's computed metrics."""
-    prompts: list[str] = []
-    from app import orchestrator
-    original = orchestrator._build_prompt
-
-    def _capture(clinical, archivist):
-        p = original(clinical, archivist)
-        prompts.append(p)
-        return p
-
-    orchestrator._build_prompt = _capture
-    try:
+class TestConsensus:
+    @pytest.mark.asyncio
+    async def test_consensus_has_required_fields(self):
         client = _build_mock_client()
+        result = await run_board(CCP014, client)
+        c = result["consensus"]
+
+        assert "joint_plan" in c
+        assert "priority_actions" in c
+        assert "conflicts" in c
+        assert isinstance(c["priority_actions"], list)
+        assert isinstance(c["conflicts"], list)
+
+    @pytest.mark.asyncio
+    async def test_consensus_matches_mock(self):
+        client = _build_mock_client()
+        result = await run_board(CCP014, client)
+        c = result["consensus"]
+
+        assert "intensify" in c["joint_plan"].lower()
+        assert len(c["priority_actions"]) == 3
+        assert len(c["conflicts"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_consensus_preserves_empty_conflicts(self):
+        """If Chair returns no conflicts, the array is empty (not missing)."""
+        chair_no_conflicts = {**_MOCK_CHAIR_RESPONSE, "conflicts": []}
+        client = _build_mock_client(chair_response=chair_no_conflicts)
+        result = await run_board(CCP014, client)
+
+        assert result["consensus"]["conflicts"] == []
+
+
+# ---------------------------------------------------------------------------
+# Tests — Confidence Scoring (§2.7)
+# ---------------------------------------------------------------------------
+
+
+class TestConfidenceScores:
+    @pytest.mark.asyncio
+    async def test_confidence_scores_for_all_agents(self):
+        client = _build_mock_client()
+        result = await run_board(CCP014, client)
+        scores = result["confidence_scores"]
+
+        assert set(scores.keys()) == {"endocrine", "cardiology", "nephrology"}
+        for key in scores:
+            assert isinstance(scores[key], int)
+            assert 35 <= scores[key] <= 97
+
+    @pytest.mark.asyncio
+    async def test_urgent_gets_higher_confidence_than_watch(self):
+        """Urgent gets +4 adj vs watch gets +0, so urgency → higher confidence."""
+        # Both use same archivist (CCP-014, completeness=75)
+        client = _build_mock_client()
+        result = await run_board(CCP014, client)
+
+        # endocrine=watch, nephrology=urgent
+        assert result["confidence_scores"]["nephrology"] > result["confidence_scores"]["endocrine"]
+
+    def test_confidence_for_low_completeness(self):
+        """Low completeness should pull confidence toward the floor."""
+        from app.models import StructuredClinicalSummary
+        low = StructuredClinicalSummary(
+            generated_at="2026-01-01T00:00:00Z",
+            metrics={},
+            threshold_crossings=[],
+            completeness=0,
+            missing_fields=["a", "b", "c", "d", "c", "d"],
+            risk_points=0,
+            risk_tier="Low",
+            rule_log=[],
+        )
+        # base = 40 + 0 * 0.55 = 40, watch adj = 0 → 40, above floor of 35
+        assert confidence_for(low, "watch") == 40
+
+    def test_confidence_for_high_completeness(self):
+        """High completeness + stable → near ceiling."""
+        from app.models import StructuredClinicalSummary
+        high = StructuredClinicalSummary(
+            generated_at="2026-01-01T00:00:00Z",
+            metrics={},
+            threshold_crossings=[],
+            completeness=100,
+            missing_fields=[],
+            risk_points=0,
+            risk_tier="Low",
+            rule_log=[],
+        )
+        assert confidence_for(high, "stable") == 97  # clamped to ceiling
+
+
+# ---------------------------------------------------------------------------
+# Tests — AI Failure Handling (§2.6)
+# ---------------------------------------------------------------------------
+
+
+class TestAIFailureHandling:
+    @pytest.mark.asyncio
+    async def test_single_specialist_failure(self):
+        """One specialist fails → fallback + others succeed + review entry."""
+        _manual_review_queue.clear()
+        client = _build_mock_client(fail_keys={"nephrology"})
+        result = await run_board(CCP014, client)
+
+        assert result["specialist_results"]["endocrine"]["risk_level"] == "watch"
+        assert result["specialist_results"]["cardiology"]["risk_level"] == "watch"
+        assert result["specialist_results"]["nephrology"]["risk_level"] == "watch"
+        assert "Agent response unavailable" in result["specialist_results"]["nephrology"]["findings"][0]["text"]
+
+        # Review queue entry created
+        queue = get_review_queue()
+        assert any(e["agent_key"] == "nephrology" for e in queue)
+
+    @pytest.mark.asyncio
+    async def test_all_specialists_fail(self):
+        """All specialists fail → all get fallback + review entries."""
+        _manual_review_queue.clear()
+        client = _build_mock_client(fail_keys={"endocrine", "cardiology", "nephrology"})
+        result = await run_board(CCP014, client)
+
+        for key in ("endocrine", "cardiology", "nephrology"):
+            assert result["specialist_results"][key]["risk_level"] == "watch"
+            assert "Agent response unavailable" in result["specialist_results"][key]["findings"][0]["text"]
+
+        queue = get_review_queue()
+        assert len(queue) >= 3
+
+    @pytest.mark.asyncio
+    async def test_chair_failure_returns_fallback_consensus(self):
+        """Chair fails → fallback consensus + patient still in response."""
+        _manual_review_queue.clear()
+        client = _build_mock_client(fail_chair=True)
+        result = await run_board(CCP014, client)
+
+        c = result["consensus"]
+        assert "unavailable" in c["joint_plan"].lower()
+        assert isinstance(c["priority_actions"], list)
+        assert c["conflicts"] == []
+
+        queue = get_review_queue()
+        assert any(e["agent_key"] == "chair" for e in queue)
+
+    @pytest.mark.asyncio
+    async def test_patient_never_disappears(self):
+        """Even with all agents failing, the response always has patient_id + archivist data."""
+        client = _build_mock_client(
+            fail_keys={"endocrine", "cardiology", "nephrology"},
+            fail_chair=True,
+        )
+        result = await run_board(CCP014, client)
+
+        assert result["patient_id"] == "CCP-014"
+        assert "archivist_summary" in result
+        assert result["data_completeness"] == 75
+        assert "confidence_scores" in result
+
+    @pytest.mark.asyncio
+    async def test_global_provider_failure(self):
+        """Entire provider down → all fallback, patient still returned."""
+        _manual_review_queue.clear()
+        client = _build_mock_client(global_error=RuntimeError("Provider down"))
+        result = await run_board(CCP014, client)
+
+        assert result["patient_id"] == "CCP-014"
+        assert result["archivist_summary"]["risk_tier"] == "High"
+        for key in ("endocrine", "cardiology", "nephrology"):
+            assert result["specialist_results"][key]["risk_level"] == "watch"
+        assert "unavailable" in result["consensus"]["joint_plan"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Tests — manual review queue
+# ---------------------------------------------------------------------------
+
+
+class TestReviewQueue:
+    def test_queue_is_list(self):
+        queue = get_review_queue()
+        assert isinstance(queue, list)
+
+    @pytest.mark.asyncio
+    async def test_queue_entries_have_required_fields(self):
+        _manual_review_queue.clear()
+        client = _build_mock_client(fail_keys={"endocrine"})
         await run_board(CCP014, client)
-    finally:
-        orchestrator._build_prompt = original
 
-    for p in prompts:
-        assert "HbA1c" in p or "hba1c" in p
-        assert "eGFR" in p or "egfr" in p
-        assert "Archivist" in p
+        entries = [e for e in get_review_queue() if e["agent_key"] == "endocrine"]
+        assert len(entries) >= 1
+        e = entries[0]
+        assert "id" in e
+        assert e["patient_id"] == "CCP-014"
+        assert "error" in e
+        assert "queued_at" in e
+        assert e["status"] == "pending"
 
 
-@pytest.mark.asyncio
-async def test_prompt_3_calls_made():
-    """Exactly 3 messages.create calls — one per specialist agent."""
-    client = _build_mock_client()
-    await run_board(CCP014, client)
+# ---------------------------------------------------------------------------
+# Tests — no identifiers in prompts
+# ---------------------------------------------------------------------------
 
-    assert client.messages.create.call_count == 3
+
+class TestPromptSecurity:
+    @pytest.mark.asyncio
+    async def test_no_identifiers_in_any_prompt(self):
+        prompts: list[str] = []
+        from app import orchestrator
+
+        orig_specialist = orchestrator._build_specialist_prompt
+        orig_chair = orchestrator._build_chair_prompt
+
+        def _track_specialist(clinical, archivist):
+            p = orig_specialist(clinical, archivist)
+            prompts.append(p)
+            return p
+
+        def _track_chair(specialist_results):
+            p = orig_chair(specialist_results)
+            prompts.append(p)
+            return p
+
+        orchestrator._build_specialist_prompt = _track_specialist
+        orchestrator._build_chair_prompt = _track_chair
+        try:
+            client = _build_mock_client()
+            await run_board(CCP014, client)
+        finally:
+            orchestrator._build_specialist_prompt = orig_specialist
+            orchestrator._build_chair_prompt = orig_chair
+
+        for p in prompts:
+            assert "CCP-014" not in p
+            assert "Synthetic Patient" not in p

@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.models import Patient, TimePoint, BPPoint
-from app.orchestrator import run_board
+from app.orchestrator import run_board, get_review_queue
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
@@ -97,3 +97,9 @@ async def board_run(req: BoardRunRequest):
         await client.close()
 
     return result
+
+
+@app.get("/api/review-queue")
+def review_queue():
+    """Return all pending manual review entries (TDD §2.6)."""
+    return get_review_queue()

@@ -76,6 +76,4 @@ React Frontend → FastAPI Backend → Agent Orchestrator → Anthropic / Kimi
 - **Full provenance.** Every finding links back to source data and calculation method.
 - **No secrets in frontend.** All LLM calls go through the backend.
 
-## License
 
-USAII Global AI Hackathon 2026

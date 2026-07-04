@@ -15,12 +15,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, RateLimitError
 
 from app.agents import AGENTS, CHAIR_SYSTEM, AgentDef
 from app.archivist import compute_archivist_summary
@@ -30,6 +31,53 @@ from app.grounding import validate_findings
 from app.models import Patient, StructuredClinicalSummary
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Retry helper for rate-limit (429) errors — TDD robustness
+# ---------------------------------------------------------------------------
+
+MAX_RETRIES = 3
+RETRY_BASE_DELAY = 10  # seconds
+RETRY_MAX_DELAY = 30   # never wait longer than this
+
+
+async def _retry_on_rate_limit(coro_factory):
+    """Call an async coroutine factory with retry + exponential backoff on 429.
+
+    ``coro_factory`` is a zero-argument callable that returns a fresh
+    coroutine each time (so the request can be safely retried).
+    """
+    last_exc: Exception | None = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            return await coro_factory()
+        except RateLimitError as exc:
+            last_exc = exc
+            error_body = getattr(exc, "response", None)
+            error_json = getattr(error_body, "json", lambda: {})() if error_body else {}
+            error_msg = (error_json.get("error", {}) or {}).get("message", "")
+
+            # Daily token-per-day limits cannot be fixed by retrying — fail fast
+            if "tokens per day" in error_msg or "TPD" in error_msg:
+                logger.error("Daily token limit reached — cannot retry: %s", error_msg)
+                raise
+
+            delay = min(RETRY_BASE_DELAY * (2 ** attempt), RETRY_MAX_DELAY)
+            retry_header = getattr(error_body, "headers", {}) or {}
+            raw_retry = retry_header.get("retry-after")
+            if raw_retry:
+                try:
+                    delay = min(max(delay, float(raw_retry)), RETRY_MAX_DELAY)
+                except (ValueError, TypeError):
+                    pass
+            logger.warning(
+                "Rate limited (attempt %d/%d). Retrying in %.0fs …",
+                attempt + 1,
+                MAX_RETRIES,
+                delay,
+            )
+            await asyncio.sleep(delay)
+    raise last_exc  # type: ignore[misc]
 
 # ---------------------------------------------------------------------------
 # Fallback payloads — patient never disappears from the UI (TDD §2.6)
@@ -186,14 +234,41 @@ def _build_chair_prompt(
 # Agent communication
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+
 def _parse_agent_response(raw: str) -> dict[str, Any]:
-    """Strip markdown fences and parse JSON from an agent response."""
+    """Strip markdown fences and parse JSON from an agent response.
+
+    LLMs (especially open-source) often produce slightly malformed JSON:
+    trailing commas, unescaped newlines in strings, or extra text around
+    the JSON. This parser handles all of those.
+    """
     cleaned = raw.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("\n", 1)[1]
-    if cleaned.endswith("```"):
-        cleaned = cleaned.rsplit("```", 1)[0]
-    cleaned = cleaned.strip()
+
+    # Strip markdown code fences (```json ... ``` or ``` ... ```)
+    if "```" in cleaned:
+        # Extract content between first pair of fences
+        match = re.search(r"```(?:json)?\s*\n?(.*?)```", cleaned, re.DOTALL)
+        if match:
+            cleaned = match.group(1).strip()
+
+    # If still not valid, try to find the outermost { ... } block
+    if not cleaned.startswith("{"):
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start != -1 and end > start:
+            cleaned = cleaned[start : end + 1]
+
+    # Fix trailing commas before } or ]
+    cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)
+
+    # Fix unescaped newlines inside string values
+    # Match content between quotes and fix newlines
+    def _fix_newlines(m: re.Match) -> str:
+        return m.group(0).replace("\n", "\\n")
+
+    cleaned = re.sub(r'"[^"]*"', _fix_newlines, cleaned)
+
     return json.loads(cleaned)
 
 
@@ -203,16 +278,19 @@ async def _call_agent(
     user_content: str,
 ) -> dict[str, Any]:
     """Call a single specialist agent and return its parsed JSON response."""
-    response = await client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        max_tokens=1000,
-        messages=[
-            {"role": "system", "content": agent.system},
-            {"role": "user", "content": user_content},
-        ],
-    )
-    raw = response.choices[0].message.content or ""
-    return _parse_agent_response(raw)
+    async def _do_call():
+        response = await client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            max_tokens=500,
+            messages=[
+                {"role": "system", "content": agent.system},
+                {"role": "user", "content": user_content},
+            ],
+        )
+        raw = response.choices[0].message.content or ""
+        return _parse_agent_response(raw)
+
+    return await _retry_on_rate_limit(_do_call)
 
 
 async def _call_chair(
@@ -220,16 +298,19 @@ async def _call_chair(
     user_content: str,
 ) -> dict[str, Any]:
     """Call the Board Chair agent and return its parsed JSON response."""
-    response = await client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        max_tokens=1000,
-        messages=[
-            {"role": "system", "content": CHAIR_SYSTEM},
-            {"role": "user", "content": user_content},
-        ],
-    )
-    raw = response.choices[0].message.content or ""
-    return _parse_agent_response(raw)
+    async def _do_call():
+        response = await client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            max_tokens=500,
+            messages=[
+                {"role": "system", "content": CHAIR_SYSTEM},
+                {"role": "user", "content": user_content},
+            ],
+        )
+        raw = response.choices[0].message.content or ""
+        return _parse_agent_response(raw)
+
+    return await _retry_on_rate_limit(_do_call)
 
 
 # ---------------------------------------------------------------------------

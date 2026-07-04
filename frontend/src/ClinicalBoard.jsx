@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 
 /* ================================================================== */
 /*  CONTINUOUS CARE PORTAL — Clinical Board                            */
@@ -82,11 +82,19 @@ export default function ClinicalBoard() {
   const [auditTrail, setAuditTrail] = useState([]);
   const [showAudit, setShowAudit] = useState(false);
   const [timing, setTiming] = useState(null);
+  const [fatalError, setFatalError] = useState(null);
   const sessionRef = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => { setFatalError(e.message || String(e)); };
+    window.addEventListener("error", handler);
+    return () => window.removeEventListener("error", handler);
+  }, []);
 
   async function runBoard() {
     setStatus("running");
     setErrMsg(null);
+    setResults({});
     setConsensus(null);
     setDecision(null);
     setEditing(false);
@@ -107,13 +115,12 @@ export default function ClinicalBoard() {
       const data = await res.json();
 
       sessionRef.current = data.session_id;
-      setArchivist(data.archivist_summary);
-      setConsensus(data.consensus);
 
       const combinedConfidence = data.confidence_scores || {};
+      const specialistResults = data.specialist_results || {};
       const next = {};
       for (const meta of AGENT_META) {
-        const r = data.specialist_results[meta.key];
+        const r = specialistResults[meta.key];
         if (r) {
           next[meta.key] = {
             ...r,
@@ -122,11 +129,14 @@ export default function ClinicalBoard() {
         }
       }
       setResults(next);
+      setArchivist(data.archivist_summary || null);
+      setConsensus(data.consensus || null);
       setEditText(data.consensus?.joint_plan || "");
       setStatus("done");
       setTiming(data.timing || null);
     } catch (e) {
       setErrMsg(e.message || "The board could not complete. Please try again.");
+      setFatalError(e.stack || String(e));
       setStatus("error");
     }
   }
@@ -197,7 +207,13 @@ export default function ClinicalBoard() {
 
   return (
     <div style={styles.page}>
+      {fatalError && (
+        <div style={{ background: "#A23B3B", color: "#fff", padding: 16, marginBottom: 16, borderRadius: 4, fontFamily: "monospace", fontSize: 13, whiteSpace: "pre-wrap" }}>
+          <b>JavaScript Error:</b> {fatalError}
+        </div>
+      )}
       <style>{`
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         @media (max-width: 860px) { .tabs-row { flex-direction: column; } }
         @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
         button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 2px solid #2B3A55; outline-offset: 2px; }
@@ -233,6 +249,12 @@ export default function ClinicalBoard() {
           {status === "running" && "Board reviewing…"}
           {(status === "done" || status === "error") && "Re-run the board"}
         </button>
+        {status === "running" && (
+          <div style={styles.loadingIndicator}>
+            <div style={styles.spinner} />
+            <span>AI agents are analyzing the patient record. This may take 15-20 seconds…</span>
+          </div>
+        )}
         {timing && (
           <div style={styles.timingNote}>
             Board: {timing.board_total_seconds}s
@@ -241,7 +263,12 @@ export default function ClinicalBoard() {
             ))}
           </div>
         )}
-        {errMsg && <div style={styles.errText}>{errMsg}</div>}
+        {errMsg && (
+          <div style={styles.errBox}>
+            <div style={styles.errText}>{errMsg}</div>
+            <div style={styles.errHint}>Make sure the backend server is running on port 8001 and GROQ_API_KEY is configured in backend/.env</div>
+          </div>
+        )}
         {auditTrail.length > 0 && (
           <button style={styles.linkButton} onClick={toggleAudit}>
             {showAudit ? "Hide audit trail" : `View audit trail (${auditTrail.length})`}
@@ -433,7 +460,7 @@ function AgentTab({ agent, result }) {
                   </div>
                   {f.evidence && (
                     <div style={styles.evidence}>
-                      ✓ verified · {f.evidence.sourceValues.join(" → ")} ({f.evidence.method})
+                      ✓ verified · {(f.evidence.source_values || []).join(" → ")} ({f.evidence.method})
                     </div>
                   )}
                 </div>
@@ -469,6 +496,10 @@ const styles = {
   runButton: { background: "#2B3A55", color: "#F2EFE4", border: "none", borderRadius: 3, padding: "12px 22px", fontSize: 14, fontWeight: 600, cursor: "pointer", letterSpacing: "0.02em" },
   timingNote: { fontFamily: "'Courier New', monospace", fontSize: 12, color: "#6B6152" },
   errText: { color: "#A23B3B", fontSize: 13 },
+  errBox: { background: "#F0D6D6", border: "1px solid #C97575", borderRadius: 4, padding: "10px 14px" },
+  errHint: { color: "#6B6152", fontSize: 11.5, marginTop: 4, fontStyle: "italic" },
+  loadingIndicator: { display: "flex", alignItems: "center", gap: 8, color: "#6B6152", fontSize: 13 },
+  spinner: { width: 16, height: 16, border: "2px solid #DEDACB", borderTop: "2px solid #2B3A55", borderRadius: "50%", animation: "spin 0.8s linear infinite" },
   linkButton: { background: "none", border: "none", color: "#2B3A55", textDecoration: "underline", fontSize: 12.5, cursor: "pointer", padding: 0 },
   archivistBox: { background: "#FBFAF5", border: "1px dashed #B0A88F", borderRadius: 4, padding: "12px 16px", marginBottom: 18, fontFamily: "'Courier New', monospace" },
   archivistHeader: { fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "#6B6152", marginBottom: 8 },

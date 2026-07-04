@@ -22,14 +22,16 @@ _TOLERANCE = 0.59
 # Requires ≥2 digits or a decimal point to avoid matching stage labels ("Stage 3"),
 # version numbers, and stray single digits inside clinical terms.
 # Handles BP fractions (158/96) via the "or" branch for slash-separated values.
+# Negative lookahead excludes time-period words (months, years, etc.) that aren't clinical values.
 DecimalOrLargeInt = r"-?\d+\.\d+|-?\d{2,}"
+_TIME_WORDS = r"months?|years?|days?|weeks?|hours?|minutes?|times?"
 _NUMBER_RE = re.compile(
-    rf"(?:^|(?<=\s)|(?<=/))({DecimalOrLargeInt})(?=[\s/%,;:)]|$)"
+    rf"(?:^|(?<=\s)|(?<=/))({DecimalOrLargeInt})(?!\s*(?:{_TIME_WORDS}))(?=[\s/%,;:)\w]|$)"
 )
 
 
 def extract_numbers(text: str) -> list[float]:
-    """Extract all numeric values from free-text."""
+    """Extract numeric values from free-text, excluding time-period references."""
     return [float(m) for m in _NUMBER_RE.findall(text)]
 
 

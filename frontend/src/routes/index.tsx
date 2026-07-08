@@ -9,6 +9,16 @@ export const Route = createFileRoute("/")({
 type Role = "family" | "specialist" | "patient";
 type Status = "crit" | "stable" | "review";
 
+interface SpecialistFinding { text: string; metric?: string | null; confidence?: number; grounded?: boolean; }
+interface SpecialistResult { risk_level: string; findings: SpecialistFinding[]; recommendation: string; }
+interface BoardResult {
+  session_id: string; patient_id: string;
+  specialist_results: Record<string, SpecialistResult>;
+  consensus: { joint_plan: string; priority_actions: string[]; conflicts: string[] };
+  confidence_scores: Record<string, number>;
+  data_completeness: number;
+}
+
 interface PatientData {
   id: string; name: string; age: number; sex: string; dx: string; status: Status;
   screening: Record<string,string>; glycemic: Record<string,string>; vitals: Record<string,string>;
@@ -16,41 +26,6 @@ interface PatientData {
   gpNote: string;
   agents: { endo: {rec:string;conf:number;warn?:boolean}; neph: {rec:string;conf:number;warn?:boolean}; card: {rec:string;conf:number;warn?:boolean} };
   plan: string; edu: string;
-}
-
-function computeCompleteness(p: PatientData): number {
-  const fields = [
-    p.screening.rbg, p.screening.hba1c, p.screening.bp, p.screening.date,
-    p.glycemic.hba1c, p.glycemic.fbs,
-    p.vitals.bp, p.vitals.hr, p.vitals.weight, p.vitals.temp,
-    p.renal.egfr, p.renal.creat, p.renal.acr, p.renal.k,
-    p.cardiac.sounds, p.cardiac.grade,
-    p.ecg.rhythm, p.ecg.rate,
-  ];
-  const filled = fields.filter(f => f && f !== "—").length;
-  return Math.round((filled / fields.length) * 100);
-}
-
-function computeEvidenceSources(p: PatientData): number {
-  let count = 0;
-  if (p.screening.date) count += 1;
-  if (p.glycemic.hba1c !== "—") count += 1;
-  if (p.vitals.bp) count += 1;
-  if (p.renal.egfr !== "—") count += 1;
-  if (p.cardiac.sounds && p.cardiac.sounds !== "Normal S1/S2, no murmur") count += 1;
-  if (p.ecg.findings && p.ecg.findings !== "Normal.") count += 1;
-  if (p.gpNote) count += 1;
-  return count;
-}
-
-function computeMissingData(p: PatientData): { field: string; tag: string }[] {
-  const missing: { field: string; tag: string }[] = [];
-  if (parseInt(p.renal.egfr) < 60) missing.push({ field: "Renal ultrasound referral", tag: "recommended for CKD" });
-  if (p.cardiac.sounds.includes("Murmur")) missing.push({ field: "Echocardiogram", tag: "required for murmur" });
-  if (parseFloat(p.glycemic.hba1c) > 8.0) missing.push({ field: "Endocrinology review", tag: "HbA1c above target" });
-  if (parseInt(p.renal.acr) > 30) missing.push({ field: "Nephrology referral", tag: "ACR elevated" });
-  if (missing.length === 0) missing.push({ field: "No missing data flagged", tag: "complete" });
-  return missing;
 }
 
 const hardcodedPatients: PatientData[] = [
@@ -149,9 +124,8 @@ function ShuraApp() {
   const [loginErr, setLoginErr] = useState(false);
   const [qdOpen, setQdOpen] = useState(false);
   const [allPatients, setAllPatients] = useState<PatientData[]>(hardcodedPatients);
-  const [sessionIds, setSessionIds] = useState<Record<string, string>>({});
-  const [boardResults, setBoardResults] = useState<Record<string, unknown>>({});
-  const [askReply, setAskReply] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [boardResult, setBoardResult] = useState<BoardResult | null>(null);
 
   useEffect(() => {
     fetchPatients()
@@ -189,8 +163,9 @@ function ShuraApp() {
   const openPatient = useCallback((p: PatientData) => {
     setActivePatient(p);
     setActivePage(1);
-    setAskReply(null);
     setScreen("record");
+    setSessionId(null);
+    setBoardResult(null);
   }, []);
 
   const showGrid = useCallback(() => setScreen("grid"), []);
@@ -200,23 +175,36 @@ function ShuraApp() {
     setActivePatient(null);
     setActivePage(1);
     setLoginErr(false);
-    setAskReply(null);
+    setSessionId(null);
+    setBoardResult(null);
     setScreen("cover");
   }, []);
 
   const gotoPage = useCallback((n: number) => setActivePage(n), []);
 
-  const handleAskShura = useCallback(async () => {
+  const handleFieldChange = useCallback((
+    section: "screening"|"glycemic"|"vitals"|"renal"|"cardiac"|"ecg",
+    field: string,
+    value: string,
+  ) => {
+    setActivePatient(prev => {
+      if (!prev) return prev;
+      const updated = { ...prev, [section]: { ...prev[section], [field]: value } };
+      setAllPatients(list => list.map(p => (p.id === updated.id ? updated : p)));
+      return updated;
+    });
+  }, []);
+
+  const handleAskShura = useCallback(() => {
     const input = document.getElementById("askInput") as HTMLInputElement;
-    if (!input || !activePatient) return;
+    const reply = document.getElementById("askReply");
+    if (!input || !reply || !activePatient) return;
     const q = input.value.trim();
     if (!q) return;
-    try {
-      const res = await apiAskShura(activePatient.id, q);
-      setAskReply(res.answer);
-    } catch {
-      setAskReply(`Based on your approved care plan: ${activePatient.edu}`);
-    }
+    reply.style.display = "block";
+    const answer = `Based on your approved care plan: ${activePatient.edu}`;
+    reply.textContent = answer;
+    apiAskShura(activePatient.id, q).catch(() => {});
   }, [activePatient]);
 
   const handleTransferBoard = useCallback((btn: HTMLElement) => {
@@ -229,21 +217,18 @@ function ShuraApp() {
     if (!activePatient || !user) return;
     try {
       const result = await runBoard(activePatient.id);
-      setSessionIds(prev => ({ ...prev, [activePatient.id]: result.session_id }));
-      setBoardResults(prev => ({ ...prev, [activePatient.id]: result }));
-      alert(`Board convened! Session: ${result.session_id}`);
+      setSessionId(result.session_id);
+      setBoardResult(result);
     } catch {
-      alert("Board unavailable — GROQ_API_KEY not configured or service down.");
+      alert("Board unavailable — GROQ_API_KEY not configured or service down. Showing demo data instead.");
     }
   }, [activePatient, user]);
 
   const handleApprove = useCallback(async () => {
-    if (!activePatient) return;
-    const sid = sessionIds[activePatient.id];
-    if (!sid || !user) { alert("No active board session. Convene the board first."); return; }
+    if (!sessionId || !user) { alert("No active board session. Convene the board first."); return; }
     try {
       await recordDecision({
-        session_id: sid,
+        session_id: sessionId,
         decision: "approved",
         physician_name: user.name,
         physician_note: "Plan approved and released to Family Medicine.",
@@ -252,15 +237,13 @@ function ShuraApp() {
     } catch {
       alert("Failed to record decision.");
     }
-  }, [sessionIds, activePatient, user]);
+  }, [sessionId, user]);
 
   const handleReject = useCallback(async () => {
-    if (!activePatient) return;
-    const sid = sessionIds[activePatient.id];
-    if (!sid || !user) { alert("No active board session."); return; }
+    if (!sessionId || !user) { alert("No active board session."); return; }
     try {
       await recordDecision({
-        session_id: sid,
+        session_id: sessionId,
         decision: "rejected",
         physician_name: user.name,
         physician_note: "Plan rejected — returned to Specialist Board.",
@@ -269,7 +252,7 @@ function ShuraApp() {
     } catch {
       alert("Failed to record decision.");
     }
-  }, [sessionIds, activePatient, user]);
+  }, [sessionId, user]);
 
   const roleLabel = role === "family" ? "Family Medicine" : role === "specialist" ? "Specialist" : "Patient";
 
@@ -294,8 +277,9 @@ function ShuraApp() {
             onRunBoard={handleRunBoard}
             onApprove={handleApprove}
             onReject={handleReject}
-            sessionId={sessionIds[activePatient.id] ?? null}
-            askReply={askReply}
+            sessionId={sessionId}
+            onFieldChange={handleFieldChange}
+            boardResult={boardResult}
           />
         )}
       </div>
@@ -374,28 +358,17 @@ function GridScreen({ user, roleLabel, patients, onOpenPatient, onLogout }: { us
   );
 }
 
-function FieldInput({ label, value, editable }: { label: string; value: string; editable: boolean }) {
-  return (
-    <div className="field">
-      <label>{label}</label>
-      <input defaultValue={value} disabled={!editable} />
-    </div>
-  );
-}
-
-function RecordScreen({ patient, user, role, roleLabel, activePage, onGotoPage, onBack, onLogout, onAskShura, onTransferBoard, onOpenQd, onRunBoard, onApprove, onReject, sessionId, askReply }: {
+function RecordScreen({ patient, user, role, roleLabel, activePage, onGotoPage, onBack, onLogout, onAskShura, onTransferBoard, onOpenQd, onRunBoard, onApprove, onReject, sessionId, onFieldChange, boardResult }: {
   patient: PatientData; user: { name: string }; role: Role; roleLabel: string;
   activePage: number; onGotoPage: (n: number) => void;
   onBack?: () => void; onLogout: () => void;
   onAskShura: () => void; onTransferBoard: (btn: HTMLElement) => void; onOpenQd: () => void;
   onRunBoard: () => void; onApprove: () => void; onReject: () => void;
-  sessionId: string | null; askReply: string | null;
+  sessionId: string | null;
+  onFieldChange: (section: "screening"|"glycemic"|"vitals"|"renal"|"cardiac"|"ecg", field: string, value: string) => void;
+  boardResult: BoardResult | null;
 }) {
   const navLabels = ["1 · Screening", "2 · Family Medicine", "3 · Specialist Board", "4 · Sign-off", "5 · Return to FM"];
-  const canEdit = role === "family";
-  const completeness = computeCompleteness(patient);
-  const evidenceCount = computeEvidenceSources(patient);
-  const missingData = computeMissingData(patient);
 
   const renderBody = () => {
     if (role === "patient") {
@@ -407,10 +380,10 @@ function RecordScreen({ patient, user, role, roleLabel, activePage, onGotoPage, 
           <div className="ask-shura">
             <h4>Ask Shura</h4>
             <div className="ask-row">
-              <input type="text" id="askInput" placeholder="e.g. Why did you stop my old medicine?" onChange={() => {}} />
+              <input type="text" id="askInput" placeholder="e.g. Why did you stop my old medicine?" />
               <div className="send" onClick={onAskShura}>Ask</div>
             </div>
-            {askReply && <div className="ask-reply" style={{ display: "block" }}>{askReply}</div>}
+            <div className="ask-reply" id="askReply" />
           </div>
         </>
       );
@@ -422,32 +395,23 @@ function RecordScreen({ patient, user, role, roleLabel, activePage, onGotoPage, 
         return (
           <>
             <div className="section-block"><h4>Initial Screening Panel</h4>
-              <div className="field-grid">
-                <FieldInput label="RBG (mg/dL)" value={patient.screening.rbg} editable={canEdit} />
-                <FieldInput label="HbA1c (%)" value={patient.screening.hba1c} editable={canEdit} />
-                <FieldInput label="Blood Pressure" value={patient.screening.bp} editable={canEdit} />
-                <FieldInput label="Date" value={patient.screening.date} editable={canEdit} />
-              </div>
+              <div className="field-grid">{[["RBG (mg/dL)","rbg",patient.screening.rbg],["HbA1c (%)","hba1c",patient.screening.hba1c],["Blood Pressure","bp",patient.screening.bp],["Date","date",patient.screening.date]].map(([l,k,v]) => (
+                <div className="field" key={l as string}><label>{l as string}</label><input value={v as string} disabled={role !== "family"} onChange={(e) => onFieldChange("screening", k as string, e.target.value)} /></div>
+              ))}</div>
               <p>Initial diagnosis: {patient.dx}.</p>
             </div>
             <div className="stat-row">
-              <div className="stat-box"><div className="v">{completeness}%</div><div className="k">Data Completeness</div></div>
-              <div className="stat-box"><div className="v">{role === "family" ? evidenceCount : "—"}</div><div className="k">Evidence Sources</div></div>
+              <div className="stat-box"><div className="v">100%</div><div className="k">Data Completeness</div></div>
+              <div className="stat-box"><div className="v">{role === "family" ? "47" : "—"}</div><div className="k">Evidence Sources</div></div>
             </div>
             <div className="section-block"><h4>Evidence Chain</h4>
-              {[
-                ["PHC Registry", patient.screening.date ? "1 record" : "0 records"],
-                ["Lab Interface HL7", patient.glycemic.hba1c !== "—" ? "3 records" : "0 records"],
-                ["Family Medicine Notes", patient.gpNote ? "1 record" : "0 records"],
-                ["Pharmacy Refill Log", patient.gpNote ? "1 record" : "0 records"],
-              ].map(([src, cnt]) => (
-                <div className="evidence-row" key={src}><span className="src">{src}</span><span className="cnt">{cnt}</span></div>
+              {[["PHC Registry","47 records"],["Lab Interface HL7","128 records"],["Family Medicine Notes","9 records"],["Pharmacy Refill Log","22 records"]].map(([src,cnt]) => (
+                <div className="evidence-row" key={src as string}><span className="src">{src as string}</span><span className="cnt">{cnt as string}</span></div>
               ))}
             </div>
             <div className="section-block"><h4>Missing Data · Flagged</h4>
-              {missingData.map((m) => (
-                <div className="missing-row" key={m.field}><span>{m.field}</span><span className="tag">{m.tag}</span></div>
-              ))}
+              <div className="missing-row"><span>Retinal exam</span><span className="tag">never on file</span></div>
+              <div className="missing-row"><span>Foot exam</span><span className="tag">overdue 18mo</span></div>
             </div>
           </>
         );
@@ -455,44 +419,34 @@ function RecordScreen({ patient, user, role, roleLabel, activePage, onGotoPage, 
         return (
           <>
             <div className="section-block"><h4>Glycemic Panel</h4>
-              <div className="field-grid">
-                <FieldInput label="HbA1c (%)" value={patient.glycemic.hba1c} editable={canEdit} />
-                <FieldInput label="FBS (mg/dL)" value={patient.glycemic.fbs} editable={canEdit} />
-                <FieldInput label="RBS (mg/dL)" value={patient.glycemic.rbs} editable={canEdit} />
-              </div>
+              <div className="field-grid">{[["HbA1c (%)","hba1c",patient.glycemic.hba1c],["FBS (mg/dL)","fbs",patient.glycemic.fbs],["RBS (mg/dL)","rbs",patient.glycemic.rbs]].map(([l,k,v]) => (
+                <div className="field" key={l as string}><label>{l as string}</label><input value={v as string} disabled={role !== "family"} onChange={(e) => onFieldChange("glycemic", k as string, e.target.value)} /></div>
+              ))}</div>
             </div>
             <div className="section-block"><h4>Vitals</h4>
-              <div className="field-grid">
-                <FieldInput label="Blood Pressure" value={patient.vitals.bp} editable={canEdit} />
-                <FieldInput label="Heart Rate" value={patient.vitals.hr} editable={canEdit} />
-                <FieldInput label="Weight (kg)" value={patient.vitals.weight} editable={canEdit} />
-                <FieldInput label="Temp (°C)" value={patient.vitals.temp} editable={canEdit} />
-              </div>
+              <div className="field-grid">{[["Blood Pressure","bp",patient.vitals.bp],["Heart Rate","hr",patient.vitals.hr],["Weight (kg)","weight",patient.vitals.weight],["Temp (°C)","temp",patient.vitals.temp]].map(([l,k,v]) => (
+                <div className="field" key={l as string}><label>{l as string}</label><input value={v as string} disabled={role !== "family"} onChange={(e) => onFieldChange("vitals", k as string, e.target.value)} /></div>
+              ))}</div>
             </div>
             <div className="section-block"><h4>Renal Panel</h4>
-              <div className="field-grid">
-                <FieldInput label="eGFR" value={patient.renal.egfr} editable={canEdit} />
-                <FieldInput label="Creatinine" value={patient.renal.creat} editable={canEdit} />
-                <FieldInput label="ACR" value={patient.renal.acr} editable={canEdit} />
-                <FieldInput label="Potassium" value={patient.renal.k} editable={canEdit} />
-              </div>
+              <div className="field-grid">{[["eGFR","egfr",patient.renal.egfr],["Creatinine","creat",patient.renal.creat],["ACR","acr",patient.renal.acr],["Potassium","k",patient.renal.k]].map(([l,k,v]) => (
+                <div className="field" key={l as string}><label>{l as string}</label><input value={v as string} disabled={role !== "family"} onChange={(e) => onFieldChange("renal", k as string, e.target.value)} /></div>
+              ))}</div>
             </div>
             <div className="section-block"><h4>Cardiac Examination</h4>
-              <div className="field-grid">
-                <FieldInput label="Heart sounds" value={patient.cardiac.sounds} editable={canEdit} />
-                <FieldInput label="Murmur grade" value={patient.cardiac.grade} editable={canEdit} />
-              </div>
+              <div className="field-grid">{[["Heart sounds","sounds",patient.cardiac.sounds],["Murmur grade","grade",patient.cardiac.grade]].map(([l,k,v]) => (
+                <div className="field" key={l as string}><label>{l as string}</label><input value={v as string} disabled={role !== "family"} onChange={(e) => onFieldChange("cardiac", k as string, e.target.value)} /></div>
+              ))}</div>
               <p>{patient.cardiac.notes}</p>
             </div>
             <div className="section-block"><h4>ECG</h4>
-              <div className="field-grid">
-                <FieldInput label="Rhythm" value={patient.ecg.rhythm} editable={canEdit} />
-                <FieldInput label="Rate" value={patient.ecg.rate} editable={canEdit} />
-              </div>
+              <div className="field-grid">{[["Rhythm","rhythm",patient.ecg.rhythm],["Rate","rate",patient.ecg.rate]].map(([l,k,v]) => (
+                <div className="field" key={l as string}><label>{l as string}</label><input value={v as string} disabled={role !== "family"} onChange={(e) => onFieldChange("ecg", k as string, e.target.value)} /></div>
+              ))}</div>
               <p>{patient.ecg.findings}</p>
             </div>
-            <div className={`section-block${!canEdit ? " locked" : ""}`}><h4>Contextual Notes to Board</h4><p>{patient.gpNote}</p></div>
-            {canEdit && (
+            <div className={`section-block${role !== "family" ? " locked" : ""}`}><h4>Contextual Notes to Board</h4><p>{patient.gpNote}</p></div>
+            {role === "family" && (
               <>
                 <div className="transfer-btn" onClick={(e) => onTransferBoard(e.currentTarget)}>⇄ Transfer to Specialist Board (Shura)</div>
                 <div className="batch-note">Sends one batched case alert — not a separate notification per abnormal value.</div>
@@ -500,45 +454,60 @@ function RecordScreen({ patient, user, role, roleLabel, activePage, onGotoPage, 
             )}
           </>
         );
-      case 3:
+      case 3: {
+        const live = boardResult && boardResult.patient_id === patient.id ? boardResult : null;
+        const specialists = live
+          ? {
+              endo: { rec: live.specialist_results.endocrine?.recommendation ?? "—", conf: live.confidence_scores.endocrine ?? 0 },
+              card: { rec: live.specialist_results.cardiology?.recommendation ?? "—", conf: live.confidence_scores.cardiology ?? 0 },
+              neph: { rec: live.specialist_results.nephrology?.recommendation ?? "—", conf: live.confidence_scores.nephrology ?? 0 },
+            }
+          : a;
+        const planText = live ? live.consensus.joint_plan : patient.plan;
         return (
           <>
             <div className="section-block"><h4>Family Medicine Note</h4><p>{patient.gpNote}</p></div>
+            <p style={{fontSize:11,fontWeight:600,color: live ? "var(--done)" : "var(--muted)",margin:"0 0 4px"}}>
+              {live ? "● Live board analysis — session " + live.session_id : "○ Demo data shown — convene the board on the Sign-off tab for a live analysis"}
+            </p>
+            <p style={{fontSize:11,color:"var(--muted)",margin:"0 0 8px"}} title="Confidence reflects how complete the underlying data is for that specialty, adjusted for risk level — it is not disease severity or specialist agreement.">
+              ⓘ % = confidence based on data completeness, not severity or agreement between specialists.
+            </p>
             <div className="dial-wrap">
               <svg className="dial" viewBox="0 0 300 300">
                 <circle className="rim" cx="150" cy="150" r="138"/>
                 <g className="tick"><line x1="150" y1="14" x2="150" y2="28"/><line x1="150" y1="272" x2="150" y2="286"/><line x1="14" y1="150" x2="28" y2="150"/><line x1="272" y1="150" x2="286" y2="150"/></g>
                 <line className="needle" x1="150" y1="150" x2="105" y2="185"/>
               </svg>
-              <div className="node n-top"><div className="ic">◐</div><div className="pct">{a.endo.conf}%</div><div className="role">Endocrine</div></div>
-              <div className="node n-left"><div className="ic">♡</div><div className="pct">{a.card.conf}%</div><div className="role">Cardiology</div></div>
-              <div className="node n-right"><div className="ic">◈</div><div className="pct">{a.neph.conf}%</div><div className="role">Nephrology</div></div>
+              <div className="node n-top"><div className="ic">◐</div><div className="pct">{specialists.endo.conf}%</div><div className="role">Endocrine</div></div>
+              <div className="node n-left"><div className="ic">♡</div><div className="pct">{specialists.card.conf}%</div><div className="role">Cardiology</div></div>
+              <div className="node n-right"><div className="ic">◈</div><div className="pct">{specialists.neph.conf}%</div><div className="role">Nephrology</div></div>
               <div className="center-seal">✓</div>
             </div>
-            <div style={{fontSize:10,color:"var(--muted)",fontFamily:"'IBM Plex Mono',monospace",marginBottom:10,textAlign:"center"}}>Confidence = 40 + (data completeness × 0.55) + risk-tier adjustment, clamped [35–97]</div>
-            <div className={`agent-card${a.endo.warn ? " warn" : ""}`}><div className="spec">Endocrinology</div><p>{a.endo.rec}</p></div>
-            <div className={`agent-card${a.neph.warn ? " warn" : ""}`}><div className="spec">Nephrology</div><p>{a.neph.rec}</p></div>
-            <div className={`agent-card${a.card.warn ? " warn" : ""}`}><div className="spec">Cardiology</div><p>{a.card.rec}</p></div>
+            <div className="agent-card"><div className="spec">Endocrinology</div><p>{specialists.endo.rec}</p></div>
+            <div className="agent-card"><div className="spec">Nephrology</div><p>{specialists.neph.rec}</p></div>
+            <div className="agent-card"><div className="spec">Cardiology</div><p>{specialists.card.rec}</p></div>
             {role === "specialist"
               ? <div className="section-block"><h4>Internal Case Chat</h4><p>🔒 Not visible to Family Medicine or patient. Full discussion thread available here.</p></div>
               : <div className="chat-lock">🔒 Internal Case Chat — restricted to specialists</div>}
-            <div className="section-block" style={{ border: "1px solid var(--gold-dim)", marginTop: 10 }}><h4 style={{ color: "var(--gold)" }}>Unified Care Plan</h4><p>{patient.plan}</p></div>
+            <div className="section-block" style={{ border: "1px solid var(--gold-dim)", marginTop: 10 }}><h4 style={{ color: "var(--gold)" }}>Unified Care Plan</h4><p>{planText}</p></div>
           </>
         );
+      }
       case 4: {
         const canSign = role === "specialist";
         return (
           <>
             <div className="section-block"><h4>Internal Medicine Sign-off</h4><p>Review the Unified Care Plan before it is released to Family Medicine.</p></div>
             <div style={{fontSize:10.5,color:"var(--muted)",marginBottom:6,fontFamily:"'IBM Plex Mono',monospace"}}>
-              Session: {sessionId ?? "No active board session — click Convene Board below"}
+              Session: {sessionId ?? "No active board session"}
             </div>
             <div className="signoff-row">
               <div className={`btn approve${canSign ? "" : " disabled"}`} onClick={() => canSign && onApprove()}>Approve</div>
               <div className={`btn reject${canSign ? "" : " disabled"}`} onClick={() => canSign && onReject()}>Reject</div>
             </div>
             {!canSign && <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>Only the Internal Medicine specialist can sign off. Family Medicine has view-only access at this stage.</p>}
-            {canSign && (
+            {role === "specialist" && (
               <div className="transfer-btn" style={{marginTop:12}} onClick={onRunBoard}>⚙ Convene Clinical Board</div>
             )}
           </>

@@ -195,16 +195,20 @@ function ShuraApp() {
     });
   }, []);
 
-  const handleAskShura = useCallback(() => {
+  const handleAskShura = useCallback(async () => {
     const input = document.getElementById("askInput") as HTMLInputElement;
     const reply = document.getElementById("askReply");
     if (!input || !reply || !activePatient) return;
     const q = input.value.trim();
     if (!q) return;
     reply.style.display = "block";
-    const answer = `Based on your approved care plan: ${activePatient.edu}`;
-    reply.textContent = answer;
-    apiAskShura(activePatient.id, q).catch(() => {});
+    reply.textContent = "Thinking...";
+    try {
+      const res = await apiAskShura(activePatient.id, q);
+      reply.textContent = res.answer;
+    } catch {
+      reply.textContent = `Based on your approved care plan: ${activePatient.edu}`;
+    }
   }, [activePatient]);
 
   const handleTransferBoard = useCallback((btn: HTMLElement) => {
@@ -261,7 +265,7 @@ function ShuraApp() {
       <div style={{ width: "100%", maxWidth: 460 }}>
         {screen === "cover" && <CoverScreen onEnter={enterApp} />}
         {screen === "login" && (
-          <LoginScreen role={role} onSelectRole={selectRole} onLogin={doLogin} loginErr={loginErr} />
+          <LoginScreen role={role} onSelectRole={selectRole} onLogin={doLogin} loginErr={loginErr} onClearErr={() => setLoginErr(false)} />
         )}
         {screen === "grid" && user && (
           <GridScreen user={user} roleLabel={roleLabel} patients={allPatients} onOpenPatient={openPatient} onLogout={logout} />
@@ -315,7 +319,7 @@ function CoverScreen({ onEnter }: { onEnter: () => void }) {
   );
 }
 
-function LoginScreen({ role, onSelectRole, onLogin, loginErr }: { role: Role; onSelectRole: (r: Role) => void; onLogin: () => void; loginErr: boolean }) {
+function LoginScreen({ role, onSelectRole, onLogin, loginErr, onClearErr }: { role: Role; onSelectRole: (r: Role) => void; onLogin: () => void; loginErr: boolean; onClearErr: () => void }) {
   return (
     <div className="login-card">
       <div className="wordmark"><h1>SHURA</h1><div className="ar">شورى</div></div>
@@ -327,8 +331,8 @@ function LoginScreen({ role, onSelectRole, onLogin, loginErr }: { role: Role; on
           </div>
         ))}
       </div>
-      <div className="field-group"><label>Full name</label><input type="text" id="loginName" placeholder="e.g. Sarah Ahmed Mostafa" onChange={() => loginErr && document.getElementById("loginErr")?.setAttribute("style","display:none")} /></div>
-      <div className="field-group"><label>National ID number</label><input type="text" id="loginId" placeholder="14-digit ID" onChange={() => loginErr && document.getElementById("loginErr")?.setAttribute("style","display:none")} /></div>
+      <div className="field-group"><label>Full name</label><input type="text" id="loginName" placeholder="e.g. Sarah Ahmed Mostafa" onChange={() => loginErr && onClearErr()} /></div>
+      <div className="field-group"><label>National ID number</label><input type="text" id="loginId" placeholder="14-digit ID" onChange={() => loginErr && onClearErr()} /></div>
       <div className="signin-btn" onClick={onLogin}>Sign In</div>
       <div className="login-err" id="loginErr" style={{ display: loginErr ? "block" : "none" }}>Please enter both name and ID number.</div>
     </div>

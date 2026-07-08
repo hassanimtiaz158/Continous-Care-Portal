@@ -381,7 +381,7 @@ def board_export(session_id: str):
                 for agent, status in trail.get("agent_status", {}).items()
             ],
             *(
-                [{"ts": trail["decided_at"], "event": "physician_decision", "decision": trail["decision"], "physician": trail.get("physician_name")}]
+                [{"ts": trail.get("decided_at", ""), "event": "physician_decision", "decision": trail["decision"], "physician": trail.get("physician_name")}]
                 if trail.get("decision")
                 else []
             ),
@@ -685,7 +685,7 @@ def patient_evidence_chain(patient_id: str):
 # Serve built frontend (SPA)
 # ---------------------------------------------------------------------------
 
-if _STATIC_DIR.is_dir():
+if _STATIC_DIR.is_dir() and (_STATIC_DIR / "assets").is_dir():
     app.mount("/assets", StaticFiles(directory=str(_STATIC_DIR / "assets")), name="assets")
 
     @app.get("/{full_path:path}")

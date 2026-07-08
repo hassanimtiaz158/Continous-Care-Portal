@@ -111,9 +111,9 @@ def create_session(
     # Summarise which agents responded vs failed
     agent_status: dict[str, str] = {}
     for key, result in specialist_results.items():
-        if result.get("failed") or result.get("risk_level") == "watch" and any(
+        if result.get("failed") or (result.get("risk_level") == "watch" and any(
             "unavailable" in (f.get("text") or "") for f in result.get("findings", [])
-        ):
+        )):
             agent_status[key] = "failed"
         else:
             agent_status[key] = "responded"

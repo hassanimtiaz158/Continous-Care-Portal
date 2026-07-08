@@ -179,7 +179,7 @@ def generate_export_pdf(
     story.append(Paragraph(f"<b>{patient_name}</b> ({patient_id})", _BODY))
     story.append(Paragraph(f"Age: {patient_age} &nbsp;|&nbsp; Sex: {patient_sex}", _BODY))
     story.append(Paragraph(f"Diagnosis: {patient_dx}", _BODY))
-    story.append(Paragraph(f"Medications: {' · '.join(patient_meds)}", _BODY))
+    story.append(Paragraph(f"Medications: {' · '.join(patient_meds) if patient_meds else 'None on file'}", _BODY))
 
     # ── Archivist Summary ───────────────────────────────────────────
     story.append(Paragraph("Archivist Summary (deterministic, no model)", _SECTION))
@@ -191,8 +191,8 @@ def generate_export_pdf(
         if not m:
             continue
         if key == "bp":
-            latest = f"{m.get('latestSys', '?')}/{m.get('latestDia', '?')}"
-            delta = f"+{m.get('sysDelta', 0)}/{m.get('diaDelta', 0)}"
+            latest = f"{m.get('latest_sys', '?')}/{m.get('latest_dia', '?')}"
+            delta = f"+{m.get('delta', 0)}/{m.get('dia_delta', 0)}"
             history = " → ".join(f"{h['t']}: {h['sys']}/{h['dia']}" for h in m.get("history", []))
         else:
             latest = f"{m.get('latest', '?')}{m.get('unit', '')}"

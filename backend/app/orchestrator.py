@@ -287,7 +287,7 @@ async def _call_agent(
                 {"role": "user", "content": user_content},
             ],
         )
-        raw = response.choices[0].message.content or ""
+        raw = (response.choices[0].message.content or "") if response.choices else ""
         return _parse_agent_response(raw)
 
     return await _retry_on_rate_limit(_do_call)
@@ -307,7 +307,7 @@ async def _call_chair(
                 {"role": "user", "content": user_content},
             ],
         )
-        raw = response.choices[0].message.content or ""
+        raw = (response.choices[0].message.content or "") if response.choices else ""
         return _parse_agent_response(raw)
 
     return await _retry_on_rate_limit(_do_call)

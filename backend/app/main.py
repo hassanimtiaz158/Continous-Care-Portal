@@ -220,6 +220,23 @@ def health():
 async def board_run(req: BoardRunRequest):
     patient = _PATIENTS.get(req.patient_id)
     if patient is None:
+        sp = _SHURA_PATIENTS.get(req.patient_id.upper())
+        if sp is not None:
+            patient = Patient(
+                id=sp.id,
+                name=sp.name,
+                age=sp.age,
+                sex=sp.sex,
+                dx=sp.dx,
+                meds=[],
+                bp=[BPPoint(t="Now", sys=int(sp.vitals.get("bp","120/80").split("/")[0]), dia=int(sp.vitals.get("bp","120/80").split("/")[1]))],
+                hba1c=[TimePoint(t="Now", v=float(sp.glycemic.get("hba1c","7.0")))],
+                egfr=[TimePoint(t="Now", v=float(sp.renal.get("egfr","90")))],
+                acr=[TimePoint(t="Now", v=float(sp.renal.get("acr","10")))],
+                ldl=[TimePoint(t="Now", v=100)],
+                missing_fields=[],
+            )
+    if patient is None:
         raise HTTPException(status_code=404, detail=f"Patient {req.patient_id} not found")
 
     api_key = os.getenv("GROQ_API_KEY")
@@ -377,13 +394,54 @@ class AskShuraRequest(BaseModel):
     question: str
 
 
+def _contextual_answer(patient: ShuraPatient, question: str) -> str:
+    """Generate a context-aware answer based on the question and patient data."""
+    q = question.lower()
+    p = patient
+
+    if any(kw in q for kw in ["medicine", "drug", "medication", "prescription", "dose", "metformin"]):
+        return (
+            f"Your current care plan: {p.plan}. "
+            f"The specialist board has reviewed your medications and recommends: "
+            f"{p.agents['endo']['rec']} {p.agents['neph']['rec']}"
+        )
+    if any(kw in q for kw in ["kidney", "renal", "egfr", "creatinine"]):
+        return (
+            f"Your kidney function: eGFR {p.renal.egfr}, Creatinine {p.renal.creat}, ACR {p.renal.acr}. "
+            f"Nephrology says: {p.agents['neph']['rec']}"
+        )
+    if any(kw in q for kw in ["heart", "cardiac", "blood pressure", "bp", "hypertension"]):
+        return (
+            f"Your blood pressure: {p.vitals.bp}, Heart rate: {p.vitals.hr}. "
+            f"Cardiology says: {p.agents['card']['rec']}"
+        )
+    if any(kw in q for kw in ["diabetes", "sugar", "glucose", "hba1c", "glycemic"]):
+        return (
+            f"Your glycemic status: HbA1c {p.glycemic.hba1c}%, FBS {p.glycemic.fbs} mg/dL. "
+            f"Endocrinology says: {p.agents['endo']['rec']}"
+        )
+    if any(kw in q for kw in ["plan", "treatment", "next", "follow", "return"]):
+        return f"Your care plan: {p.plan}. Education: {p.edu}"
+    if any(kw in q for kw in ["murmur", "ecg", "rhythm"]):
+        return (
+            f"Cardiac findings: {p.cardiac.sounds}, ECG: {p.ecg.rhythm} at {p.ecg.rate} bpm. "
+            f"{p.ecg.findings} Cardiology says: {p.agents['card']['rec']}"
+        )
+
+    return (
+        f"Regarding your question about '{question}': "
+        f"Your care plan is: {p.plan}. "
+        f"Education summary: {p.edu}"
+    )
+
+
 @app.post("/api/board/ask-shura")
 def ask_shura(req: AskShuraRequest):
-    """Return the patient education summary as a Shura response."""
+    """Return a context-aware answer based on the question and patient data."""
     p = _SHURA_PATIENTS.get(req.patient_id.upper())
     if p is None:
         raise HTTPException(status_code=404, detail=f"Patient {req.patient_id} not found")
-    return {"question": req.question, "answer": f"Based on your approved care plan: {p.edu}"}
+    return {"question": req.question, "answer": _contextual_answer(p, req.question)}
 
 
 # ---------------------------------------------------------------------------

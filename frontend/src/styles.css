@@ -1,12 +1,29 @@
+@import "tailwindcss";
 @import "tw-animate-css";
 
+@theme {
+  --color-void: #0B1119;
+  --color-slate: #141C24;
+  --color-gold: #C9A227;
+  --color-teal: #3D8B8B;
+  --color-rose: #B23A48;
+  --color-muted: #7C8494;
+  --color-cream: #EFE9DA;
+  --color-line: rgba(201,162,39,0.22);
+  --color-done: #4F7A5A;
+}
+
+html{scroll-behavior: smooth;}
 *{box-sizing:border-box;}
 
 :root{
-  --void:#070B12; --void-2:#0B1119; --void-3:#111A26;
+  --void:#0B1119; --void-2:#141C24; --void-3:#111A26;
   --cream:#EFE9DA; --muted:#7C8494; --line:rgba(201,162,39,0.22);
   --gold:#C9A227; --gold-dim:#8A731E;
   --teal:#3D8B8B; --rose:#B23A48; --done:#4F7A5A;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
 }
 
 body{

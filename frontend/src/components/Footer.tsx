@@ -44,7 +44,7 @@ export function Footer() {
             © 2026 · Continuous Care Portal · Hackathon Prototype
           </div>
           <div className="mono text-[10px] uppercase tracking-[2px] text-muted">
-            v1.0 · Frontend Only · Mock Data
+            v1.0 • Frontend Only • Production Data
           </div>
         </div>
       </div>

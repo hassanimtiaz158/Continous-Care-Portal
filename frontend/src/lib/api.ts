@@ -134,15 +134,6 @@ export async function sendChat(patientId: string, senderName: string, senderRole
   if (!res.ok) throw new Error("Failed to send message");
   return res.json();
 }
-export async function codeIcd10(chiefComplaint: string, patientId?: string) {
-  const res = await fetch(`${API_BASE}/api/icd10/code`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chief_complaint: chiefComplaint, patient_id: patientId }),
-  });
-  if (!res.ok) throw new Error("ICD-10 coding failed");
-  return res.json();
-}
 
 export async function fetchConsensus(patientId: string) {
   const res = await fetch(`${API_BASE}/api/patients/${patientId}/consensus`);

@@ -2,8 +2,19 @@ import { useEffect, useRef } from "react";
 import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { SectionHeader } from "./SectionHeader";
-import { specialists } from "@/data/clinical";
 import { Stethoscope, Heart, Droplet } from "lucide-react";
+
+export interface SpecialistData {
+  id: "endo" | "cardio" | "neph";
+  name: string;
+  riskLevel: string;
+  riskColor: "rose" | "teal" | "amber";
+  findings: string[];
+  recommendation: string;
+  confidence: number;
+  warn?: boolean;
+  conflictNote?: string;
+}
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -13,7 +24,7 @@ const iconFor: Record<string, React.ReactNode> = {
   neph: <Droplet className="h-5 w-5" />,
 };
 
-export function SpecialistBoard() {
+export function SpecialistBoard({ data }: { data: SpecialistData[] }) {
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
     const ctx = gsap.context(() => {
@@ -35,8 +46,8 @@ export function SpecialistBoard() {
         />
 
         <div className="mt-16 grid gap-8 md:grid-cols-2 xl:grid-cols-3">
-          {specialists.map(s => (
-            <article key={s.id} className="spec-card card-luxe card-luxe-hover judge-highlight relative overflow-hidden p-8 md:p-10">
+          {data.map(s => (
+            <article key={s.id} className={`spec-card card-luxe card-luxe-hover judge-highlight relative overflow-hidden p-8 md:p-10 ${s.warn ? "flagged" : ""}`}>
               <span className="judge-badge">Confidence</span>
               <div
                 className="absolute inset-x-0 top-0 h-px"
@@ -88,6 +99,13 @@ export function SpecialistBoard() {
                 <div className="mono text-[9px] uppercase tracking-[1.5px] text-[--gold]">Recommendation</div>
                 <p className="mt-2 text-sm leading-relaxed text-cream">{s.recommendation}</p>
               </div>
+
+              {s.warn && s.conflictNote && (
+                <div className="xaudit-flag mt-4 border border-[--rose]/40 bg-[--rose]/10 p-3 rounded-md">
+                  <div className="mono text-[9px] uppercase tracking-[1.5px] text-[--rose] mb-1">⚠ Cross-audit Flag</div>
+                  <p className="text-xs leading-relaxed text-[--rose]">{s.conflictNote}</p>
+                </div>
+              )}
 
               <div className="mt-6 flex items-end justify-between">
                 <div>

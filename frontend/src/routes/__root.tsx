@@ -12,6 +12,8 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { JudgeModeProvider } from "../lib/judge-mode";
+import { AppLayout } from "../components/layout/AppLayout";
+import { Toaster } from "sonner";
 
 function NotFoundComponent() {
   return (
@@ -95,7 +97,10 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <JudgeModeProvider>
-        <Outlet />
+        <AppLayout>
+          <Outlet />
+        </AppLayout>
+        <Toaster theme="dark" position="top-right" />
       </JudgeModeProvider>
     </QueryClientProvider>
   );

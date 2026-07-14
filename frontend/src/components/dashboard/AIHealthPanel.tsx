@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { Card, CardContent } from '../ui/card';
-import { SectionHeader } from '../shared/SectionHeader';
-import { Activity } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { healthCheck } from '@/lib/api';
+import React, { useEffect, useState } from "react";
+import { Card, CardContent } from "../ui/card";
+import { SectionHeader } from "../shared/SectionHeader";
+import { Activity } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { healthCheck } from "@/lib/api";
 
 export function AIHealthPanel() {
   const [status, setStatus] = useState<"Operational" | "Offline" | "Checking...">("Checking...");
@@ -27,9 +27,7 @@ export function AIHealthPanel() {
     return () => clearInterval(interval);
   }, []);
 
-  const systems = [
-    { name: "SHURA Core", status: status, ping: ping },
-  ];
+  const systems = [{ name: "SHURA Core", status: status, ping: ping }];
 
   return (
     <div className="mb-8">
@@ -37,26 +35,37 @@ export function AIHealthPanel() {
       <Card className="bg-void border-line">
         <CardContent className="p-0 divide-y divide-line">
           {systems.map((sys, i) => (
-            <div key={i} className="flex items-center justify-between p-4 hover:bg-void-2 transition-colors">
+            <div
+              key={i}
+              className="flex items-center justify-between p-4 hover:bg-void-2 transition-colors"
+            >
               <div className="flex items-center gap-3">
                 <div className="relative flex h-2 w-2">
-                  <span className={cn(
-                    "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
-                    sys.status === 'Operational' ? "bg-teal" : "bg-rose"
-                  )}></span>
-                  <span className={cn(
-                    "relative inline-flex rounded-full h-2 w-2",
-                    sys.status === 'Operational' ? "bg-teal" : "bg-rose"
-                  )}></span>
+                  <span
+                    className={cn(
+                      "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
+                      sys.status === "Operational" ? "bg-teal" : "bg-rose",
+                    )}
+                  ></span>
+                  <span
+                    className={cn(
+                      "relative inline-flex rounded-full h-2 w-2",
+                      sys.status === "Operational" ? "bg-teal" : "bg-rose",
+                    )}
+                  ></span>
                 </div>
                 <span className="text-sm font-medium text-cream">{sys.name}</span>
               </div>
               <div className="flex items-center gap-4 text-[10px] font-mono uppercase tracking-widest">
                 <span className="text-muted">{sys.ping}</span>
-                <span className={cn(
-                  "w-20 text-right",
-                  sys.status === 'Operational' ? 'text-teal' : 'text-rose'
-                )}>{sys.status}</span>
+                <span
+                  className={cn(
+                    "w-20 text-right",
+                    sys.status === "Operational" ? "text-teal" : "text-rose",
+                  )}
+                >
+                  {sys.status}
+                </span>
               </div>
             </div>
           ))}
@@ -65,4 +74,3 @@ export function AIHealthPanel() {
     </div>
   );
 }
-

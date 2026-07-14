@@ -1,4 +1,5 @@
-import { DISCLAIMER } from "@/data/clinical";
+const DISCLAIMER =
+  "The Clinical Board does not diagnose, prescribe, or make final treatment decisions. All recommendations require physician review.";
 
 export function Footer() {
   return (
@@ -6,9 +7,12 @@ export function Footer() {
       <div className="mx-auto max-w-7xl">
         <div className="grid gap-10 md:grid-cols-[1.5fr_1fr_1fr]">
           <div>
-            <div className="mono text-[10px] uppercase tracking-[3px] text-muted">Continuous Care Portal</div>
+            <div className="mono text-[10px] uppercase tracking-[3px] text-muted">
+              Continuous Care Portal
+            </div>
             <div className="mt-4 font-serif text-2xl text-cream">
-              Multi-agent clinical review, <span className="italic gold-text">built for physicians.</span>
+              Multi-agent clinical review,{" "}
+              <span className="italic gold-text">built for physicians.</span>
             </div>
             <p className="mt-4 max-w-md text-sm leading-relaxed text-muted">{DISCLAIMER}</p>
           </div>
@@ -16,12 +20,36 @@ export function Footer() {
           <div>
             <div className="mono text-[10px] uppercase tracking-[2px] text-muted">Sections</div>
             <ul className="mt-4 space-y-2 text-sm text-cream">
-              <li><a href="#overview" className="hover:text-[--gold]">Patient Overview</a></li>
-              <li><a href="#archivist" className="hover:text-[--gold]">Archivist Analysis</a></li>
-              <li><a href="#specialists" className="hover:text-[--gold]">Specialist Board</a></li>
-              <li><a href="#consensus" className="hover:text-[--gold]">Consensus</a></li>
-              <li><a href="#review" className="hover:text-[--gold]">Review Workspace</a></li>
-              <li><a href="#audit" className="hover:text-[--gold]">Audit Trail</a></li>
+              <li>
+                <a href="#overview" className="hover:text-[--gold]">
+                  Patient Overview
+                </a>
+              </li>
+              <li>
+                <a href="#archivist" className="hover:text-[--gold]">
+                  Archivist Analysis
+                </a>
+              </li>
+              <li>
+                <a href="#specialists" className="hover:text-[--gold]">
+                  Specialist Board
+                </a>
+              </li>
+              <li>
+                <a href="#consensus" className="hover:text-[--gold]">
+                  Consensus
+                </a>
+              </li>
+              <li>
+                <a href="#review" className="hover:text-[--gold]">
+                  Review Workspace
+                </a>
+              </li>
+              <li>
+                <a href="#audit" className="hover:text-[--gold]">
+                  Audit Trail
+                </a>
+              </li>
             </ul>
           </div>
 

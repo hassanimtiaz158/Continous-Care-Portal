@@ -1,22 +1,24 @@
-import React from 'react';
-import { Card, CardContent } from '../ui/card';
-import { Badge } from '../ui/badge';
-import { Button } from '../ui/button';
-import { AIStatusBadge } from '../shared/AIStatusBadge';
-import { ConfidenceMeter } from '../shared/ConfidenceMeter';
-import { SectionHeader } from '../shared/SectionHeader';
-import { motion } from 'framer-motion';
+import React from "react";
+import { Card, CardContent } from "../ui/card";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { AIStatusBadge } from "../shared/AIStatusBadge";
+import { ConfidenceMeter } from "../shared/ConfidenceMeter";
+import { SectionHeader } from "../shared/SectionHeader";
+import { motion } from "framer-motion";
 
-// Using PatientData interface from index.tsx shape
-interface PatientQueueItem {
-  id: string;
-  name: string;
-  status: 'crit' | 'stable' | 'review';
-  dx: string;
-}
+import { PatientData } from "../../types/patient";
 
-export function PriorityQueue({ patients, onOpenPatient }: { patients: PatientQueueItem[], onOpenPatient: (p: PatientQueueItem) => void }) {
-  const criticalPatients = patients.filter(p => p.status === 'crit' || p.status === 'review').slice(0, 5);
+export function PriorityQueue({
+  patients,
+  onOpenPatient,
+}: {
+  patients: PatientData[];
+  onOpenPatient: (p: PatientData) => void;
+}) {
+  const criticalPatients = patients
+    .filter((p) => p.status === "crit" || p.status === "review")
+    .slice(0, 5);
 
   if (criticalPatients.length === 0) {
     return (
@@ -36,7 +38,7 @@ export function PriorityQueue({ patients, onOpenPatient }: { patients: PatientQu
       <SectionHeader title="Priority Queue" subtitle="Cases requiring immediate attention" />
       <div className="flex flex-col gap-2">
         {criticalPatients.map((patient, i) => (
-          <motion.div 
+          <motion.div
             key={patient.id}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -52,8 +54,12 @@ export function PriorityQueue({ patients, onOpenPatient }: { patients: PatientQu
                     <div className="flex items-center gap-2 mb-1">
                       <span className="font-medium text-cream">{patient.name}</span>
                       <span className="text-[10px] font-mono text-muted">#{patient.id}</span>
-                      {patient.status === 'crit' && <Badge variant="destructive">Critical</Badge>}
-                      {patient.status === 'review' && <Badge variant="outline" className="border-gold text-gold">Review</Badge>}
+                      {patient.status === "crit" && <Badge variant="destructive">Critical</Badge>}
+                      {patient.status === "review" && (
+                        <Badge variant="outline" className="border-gold text-gold">
+                          Review
+                        </Badge>
+                      )}
                     </div>
                     <div className="text-xs text-muted truncate max-w-md">{patient.dx}</div>
                   </div>
@@ -61,15 +67,24 @@ export function PriorityQueue({ patients, onOpenPatient }: { patients: PatientQu
 
                 <div className="flex items-center gap-6 w-full md:w-auto overflow-x-auto pb-2 md:pb-0 hide-scrollbar">
                   <div className="flex flex-col gap-1 min-w-[120px]">
-                    <span className="text-[9px] uppercase tracking-widest text-muted font-mono">Consensus</span>
-                    <AIStatusBadge status={patient.status === 'crit' ? 'error' : 'verified'} />
+                    <span className="text-[9px] uppercase tracking-widest text-muted font-mono">
+                      Consensus
+                    </span>
+                    <AIStatusBadge status={patient.status === "crit" ? "conflict" : "complete"} />
                   </div>
                   <div className="flex flex-col gap-1 min-w-[100px]">
-                    <span className="text-[9px] uppercase tracking-widest text-muted font-mono">Confidence</span>
-                    <ConfidenceMeter score={patient.status === 'crit' ? 65 : 92} />
+                    <span className="text-[9px] uppercase tracking-widest text-muted font-mono">
+                      Confidence
+                    </span>
+                    <ConfidenceMeter score={patient.status === "crit" ? 65 : 92} />
                   </div>
                   <div className="shrink-0">
-                    <Button variant="outline" size="sm" onClick={() => onOpenPatient(patient)} className="h-8 text-xs font-mono uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onOpenPatient(patient)}
+                      className="h-8 text-xs font-mono uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
                       Open Case
                     </Button>
                   </div>

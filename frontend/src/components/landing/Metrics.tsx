@@ -1,11 +1,11 @@
-import React from 'react';
-import { motion } from 'framer-motion';
+import React from "react";
+import { motion } from "framer-motion";
 
 const metrics = [
   { label: "Active AI Specialists", value: "3", suffix: "" },
   { label: "Evidence Traceability", value: "100", suffix: "%" },
   { label: "Data Hallucination Tolerance", value: "0", suffix: "%" },
-  { label: "Required Human Sign-offs", value: "1", suffix: " per plan" }
+  { label: "Required Human Sign-offs", value: "1", suffix: " per plan" },
 ];
 
 export function Metrics() {
@@ -14,7 +14,7 @@ export function Metrics() {
       <div className="max-w-6xl mx-auto px-6 relative z-10">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-8 md:gap-4 divide-x divide-line">
           {metrics.map((m, i) => (
-            <motion.div 
+            <motion.div
               key={i}
               initial={{ opacity: 0, y: 20 }}
               whileInView={{ opacity: 1, y: 0 }}

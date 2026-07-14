@@ -8,10 +8,23 @@ export async function fetchPatients() {
 }
 
 export async function createPatient(intake: {
-  name: string; age: number; sex: string; chief_complaint: string;
-  dx?: string; status?: string; gp_note?: string; meds?: string[];
-  bp_sys?: number; bp_dia?: number; hba1c?: number; egfr?: number;
-  acr?: number; ldl?: number; creat?: number; k?: number; hr?: number;
+  name: string;
+  age: number;
+  sex: string;
+  chief_complaint: string;
+  dx?: string;
+  status?: string;
+  gp_note?: string;
+  meds?: string[];
+  bp_sys?: number;
+  bp_dia?: number;
+  hba1c?: number;
+  egfr?: number;
+  acr?: number;
+  ldl?: number;
+  creat?: number;
+  k?: number;
+  hr?: number;
 }) {
   const res = await fetch(`${API_BASE}/api/patients`, {
     method: "POST",
@@ -125,7 +138,12 @@ export async function fetchChat(patientId: string) {
   return res.json();
 }
 
-export async function sendChat(patientId: string, senderName: string, senderRole: string, text: string) {
+export async function sendChat(
+  patientId: string,
+  senderName: string,
+  senderRole: string,
+  text: string,
+) {
   const res = await fetch(`${API_BASE}/api/patients/${patientId}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

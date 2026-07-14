@@ -1,11 +1,11 @@
-import React from 'react';
-import { motion } from 'framer-motion';
-import { Button } from '../ui/button';
-import { HeroWorkflow } from './HeroWorkflow';
-import { WhyShura } from './WhyShura';
-import { Capabilities } from './Capabilities';
-import { Metrics } from './Metrics';
-import { FinalCTA } from './FinalCTA';
+import React from "react";
+import { motion } from "framer-motion";
+import { Button } from "../ui/button";
+import { HeroWorkflow } from "./HeroWorkflow";
+import { WhyShura } from "./WhyShura";
+import { Capabilities } from "./Capabilities";
+import { Metrics } from "./Metrics";
+import { FinalCTA } from "./FinalCTA";
 
 export function LandingPage({ onEnter }: { onEnter: () => void }) {
   return (
@@ -19,7 +19,12 @@ export function LandingPage({ onEnter }: { onEnter: () => void }) {
           <span className="font-serif text-xl tracking-widest text-cream">SHURA</span>
         </div>
         <div className="flex items-center gap-4">
-          <a href="https://github.com/hassan-imtiaz/CCP-v.1" target="_blank" rel="noreferrer" className="text-xs uppercase tracking-widest text-muted hover:text-cream transition-colors font-mono hidden md:block">
+          <a
+            href="https://github.com/hassan-imtiaz/CCP-v.1"
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs uppercase tracking-widest text-muted hover:text-cream transition-colors font-mono hidden md:block"
+          >
             View Architecture
           </a>
           <Button variant="outline" size="sm" onClick={onEnter} className="text-xs">
@@ -41,13 +46,15 @@ export function LandingPage({ onEnter }: { onEnter: () => void }) {
             Clinical Decision Support Engine
           </div>
           <h1 className="text-5xl md:text-7xl font-serif text-cream leading-[1.1] mb-6">
-            The anti-hallucination engine for <span className="text-gold italic">modern medicine.</span>
+            The anti-hallucination engine for{" "}
+            <span className="text-gold italic">modern medicine.</span>
           </h1>
           <p className="text-lg md:text-xl text-muted mb-10 max-w-2xl mx-auto leading-relaxed">
-            A multi-agent review board that proves every claim, enforces human oversight, and locks clinical decisions into an immutable audit trail.
+            A multi-agent review board that proves every claim, enforces human oversight, and locks
+            clinical decisions into an immutable audit trail.
           </p>
           <div className="flex items-center justify-center gap-4">
-            <Button variant="primary" size="lg" onClick={onEnter} className="h-12 px-8">
+            <Button variant="default" size="lg" onClick={onEnter} className="h-12 px-8">
               Access the Platform
             </Button>
             <Button variant="outline" size="lg" onClick={onEnter} className="h-12 px-8">

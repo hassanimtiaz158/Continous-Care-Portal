@@ -1,7 +1,7 @@
-import React from 'react';
-import { Card, CardContent } from '../ui/card';
-import { SectionHeader } from '../shared/SectionHeader';
-import { Lightbulb } from 'lucide-react';
+import React from "react";
+import { Card, CardContent } from "../ui/card";
+import { SectionHeader } from "../shared/SectionHeader";
+import { Lightbulb } from "lucide-react";
 
 export function AIInsight({ reviewCount }: { reviewCount: number }) {
   return (
@@ -15,7 +15,9 @@ export function AIInsight({ reviewCount }: { reviewCount: number }) {
             </div>
             <div>
               <p className="text-sm text-cream leading-relaxed">
-                Review turnaround is optimal. The board has surfaced {reviewCount} complex cases that require your attention today. SHURA Core is actively monitoring patient trends across the active cohort.
+                Review turnaround is optimal. The board has surfaced {reviewCount} complex cases
+                that require your attention today. SHURA Core is actively monitoring patient trends
+                across the active cohort.
               </p>
             </div>
           </div>

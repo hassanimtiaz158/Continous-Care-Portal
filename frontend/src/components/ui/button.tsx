@@ -11,7 +11,8 @@ const buttonVariants = cva(
       variant: {
         default: "bg-gold text-void shadow hover:bg-gold-dim font-semibold",
         destructive: "bg-rose text-cream shadow-sm hover:bg-rose/90",
-        outline: "border border-line bg-transparent shadow-sm hover:bg-void-2 hover:text-cream text-muted",
+        outline:
+          "border border-line bg-transparent shadow-sm hover:bg-void-2 hover:text-cream text-muted",
         secondary: "bg-void-2 text-cream shadow-sm hover:bg-void-3 border border-line",
         ghost: "hover:bg-void-2 hover:text-gold text-muted",
         link: "text-gold underline-offset-4 hover:underline",

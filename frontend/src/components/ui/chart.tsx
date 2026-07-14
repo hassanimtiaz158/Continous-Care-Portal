@@ -216,9 +216,7 @@ const ChartTooltipContent = React.forwardRef<
                       >
                         <div className="grid gap-1.5">
                           {nestLabel ? tooltipLabel : null}
-                          <span className="text-muted">
-                            {itemConfig?.label || item.name}
-                          </span>
+                          <span className="text-muted">{itemConfig?.label || item.name}</span>
                         </div>
                         {item.value && (
                           <span className="font-mono font-medium tabular-nums text-cream">
@@ -272,9 +270,7 @@ const ChartLegendContent = React.forwardRef<
           return (
             <div
               key={item.value}
-              className={cn(
-                "flex items-center gap-1.5 [&>svg]:h-3 [&>svg]:w-3 [&>svg]:text-muted",
-              )}
+              className={cn("flex items-center gap-1.5 [&>svg]:h-3 [&>svg]:w-3 [&>svg]:text-muted")}
             >
               {itemConfig?.icon && !hideIcon ? (
                 <itemConfig.icon />

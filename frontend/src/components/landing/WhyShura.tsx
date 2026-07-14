@@ -1,22 +1,24 @@
-import React from 'react';
-import { motion } from 'framer-motion';
-import { Check, X } from 'lucide-react';
+import React from "react";
+import { motion } from "framer-motion";
+import { Check, X } from "lucide-react";
 
 export function WhyShura() {
   return (
     <section className="py-24 border-y border-line bg-slate relative overflow-hidden">
       <div className="absolute inset-0 bg-[url('/noise.png')] opacity-5 pointer-events-none mix-blend-overlay" />
-      
+
       <div className="max-w-6xl mx-auto px-6 relative z-10">
         <div className="text-center mb-16 max-w-2xl mx-auto">
-          <h2 className="text-sm font-mono uppercase tracking-widest text-gold mb-4">The Shura Standard</h2>
+          <h2 className="text-sm font-mono uppercase tracking-widest text-gold mb-4">
+            The Shura Standard
+          </h2>
           <p className="text-3xl md:text-4xl font-serif text-cream leading-tight">
             We build for truth, not convenience. The era of the black-box clinical oracle is over.
           </p>
         </div>
 
         <div className="grid md:grid-cols-2 gap-8 lg:gap-16 items-center">
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, x: -20 }}
             whileInView={{ opacity: 1, x: 0 }}
             viewport={{ once: true }}
@@ -40,7 +42,7 @@ export function WhyShura() {
             </ul>
           </motion.div>
 
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, x: 20 }}
             whileInView={{ opacity: 1, x: 0 }}
             viewport={{ once: true }}

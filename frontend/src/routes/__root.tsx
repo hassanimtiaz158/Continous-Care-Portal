@@ -10,8 +10,6 @@ import {
 import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
-import { reportLovableError } from "../lib/lovable-error-reporting";
-import { JudgeModeProvider } from "../lib/judge-mode";
 import { AppLayout } from "../components/layout/AppLayout";
 import { Toaster } from "sonner";
 
@@ -32,14 +30,17 @@ function NotFoundComponent() {
 function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   const router = useRouter();
   useEffect(() => {
-    reportLovableError(error, { boundary: "tanstack_root_error_component" });
+    console.error("Root boundary caught an error:", error);
   }, [error]);
   return (
     <div className="flex min-h-screen items-center justify-center bg-atmosphere px-4">
       <div className="max-w-md text-center">
         <h1 className="section-title text-2xl">Something interrupted the review board.</h1>
         <button
-          onClick={() => { router.invalidate(); reset(); }}
+          onClick={() => {
+            router.invalidate();
+            reset();
+          }}
           className="gold-btn mt-8"
         >
           Reconvene
@@ -55,9 +56,17 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "Shura — Clinical AI Council" },
-      { name: "description", content: "Shura — a transparent multi-agent clinical review system supporting physician decision-making." },
+      {
+        name: "description",
+        content:
+          "Shura — a transparent multi-agent clinical review system supporting physician decision-making.",
+      },
       { property: "og:title", content: "Shura — Clinical AI Council" },
-      { property: "og:description", content: "Transparent multi-agent clinical review board with full provenance, grounding validation, and human oversight." },
+      {
+        property: "og:description",
+        content:
+          "Transparent multi-agent clinical review board with full provenance, grounding validation, and human oversight.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -84,7 +93,7 @@ function RootShell({ children }: { children: ReactNode }) {
       <head>
         <HeadContent />
       </head>
-      <body>
+      <body className="bg-void font-sans text-cream antialiased selection:bg-gold/20">
         {children}
         <Scripts />
       </body>
@@ -96,12 +105,10 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   return (
     <QueryClientProvider client={queryClient}>
-      <JudgeModeProvider>
-        <AppLayout>
-          <Outlet />
-        </AppLayout>
-        <Toaster theme="dark" position="top-right" />
-      </JudgeModeProvider>
+      <AppLayout>
+        <Outlet />
+      </AppLayout>
+      <Toaster theme="dark" position="bottom-right" />
     </QueryClientProvider>
   );
 }

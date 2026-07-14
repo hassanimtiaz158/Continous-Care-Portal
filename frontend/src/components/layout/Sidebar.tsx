@@ -17,7 +17,7 @@ export function Sidebar({ isMobile = false, onClose }: SidebarProps) {
   return (
     <aside
       className={cn(
-        "h-full flex flex-col py-6 bg-slate border-r border-line shrink-0 transition-all z-50",
+        "h-full flex flex-col py-6 bg-void/75 backdrop-blur-xl border-r border-line/40 shadow-2xl shrink-0 transition-all z-50",
         isMobile ? "w-64" : "w-16 lg:w-64",
       )}
     >

@@ -9,7 +9,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-screen w-full bg-void text-cream font-sans overflow-hidden">
       {/* Mobile Top Header */}
-      <div className="md:hidden fixed top-0 left-0 right-0 h-16 bg-void-2 border-b border-line z-40 flex items-center justify-between px-4">
+      <div className="md:hidden fixed top-0 left-0 right-0 h-16 bg-void/70 backdrop-blur-xl border-b border-line/40 z-40 flex items-center justify-between px-4">
         <div className="flex items-center gap-3">
           <button onClick={() => setDrawerOpen(true)} className="text-cream p-1">
             <Menu className="w-6 h-6" />
@@ -19,7 +19,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       </div>
 
       {/* Desktop & Tablet Sidebar */}
-      <div className="hidden md:block shrink-0">
+      <div className="hidden md:block shrink-0 h-full z-50 relative">
         <Sidebar isMobile={false} />
       </div>
 
@@ -31,6 +31,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
+              transition={{ duration: 0.25, ease: "easeInOut" }}
               onClick={() => setDrawerOpen(false)}
               className="md:hidden fixed inset-0 bg-void/80 backdrop-blur-sm z-50"
             />
@@ -38,8 +39,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               initial={{ x: "-100%" }}
               animate={{ x: 0 }}
               exit={{ x: "-100%" }}
-              transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="md:hidden fixed inset-y-0 left-0 z-50 flex"
+              transition={{ duration: 0.25, ease: "easeOut" }}
+              className="md:hidden fixed inset-y-0 left-0 z-50 flex shadow-2xl"
             >
               <Sidebar isMobile={true} onClose={() => setDrawerOpen(false)} />
             </motion.div>

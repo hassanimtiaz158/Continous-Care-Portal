@@ -35,7 +35,6 @@ body{
     radial-gradient(1px 1px at 78% 30%, rgba(255,255,255,0.45), transparent),
     radial-gradient(1px 1px at 91% 60%, #fff, transparent),
     radial-gradient(ellipse at 50% 0%, #131C29, var(--void) 60%);
-  display:flex; align-items:center; justify-content:center; padding:24px 14px;
 }
 .screen{width:100%; max-width:460px;}
 .hidden{display:none !important;}

@@ -97,14 +97,7 @@ export function ClinicalWorkspace({
   };
 
   return (
-    <div className="flex-1 h-full w-full flex bg-void overflow-hidden">
-      <ContextPanel
-        patient={patient}
-        onBack={onBack}
-        currentStage={stage}
-        onAskShura={onAskShura}
-        dataCompleteness={completeness}
-      />
+    <div className="flex-1 h-full w-full flex flex-col md:flex-row bg-void overflow-y-auto md:overflow-hidden">
       <WorkspaceCanvas
         patient={patient}
         onFieldChange={onFieldChange}
@@ -122,6 +115,13 @@ export function ClinicalWorkspace({
         onToggleProveIt={onToggleProveIt}
         hoveredMetric={hoveredMetric}
         onHoverMetric={setHoveredMetric}
+      />
+      <ContextPanel
+        patient={patient}
+        onBack={onBack}
+        currentStage={stage}
+        onAskShura={onAskShura}
+        dataCompleteness={completeness}
       />
     </div>
   );

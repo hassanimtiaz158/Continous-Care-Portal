@@ -48,8 +48,8 @@ export function ClinicalOverview({
   }).length;
 
   return (
-    <div className="h-full w-full overflow-y-auto px-6 py-8 pb-24">
-      <div className="max-w-6xl mx-auto">
+    <div className="h-full w-full overflow-y-auto p-4 md:p-6 lg:p-8 pb-24">
+      <div className="w-full">
         <WelcomeHeader userName={user.name} roleLabel={roleLabel} onLogout={onLogout} />
 
         <ClinicalFocus pendingReview={reviewCount} missingData={missingData} />
@@ -110,7 +110,7 @@ export function ClinicalOverview({
             </Button>
           </div>
         ) : (
-          <div className="grid lg:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {/* Main Content Column */}
             <div className="lg:col-span-2 flex flex-col">
               <PriorityQueue patients={patients} onOpenPatient={onOpenPatient} />
@@ -123,7 +123,7 @@ export function ClinicalOverview({
             </div>
 
             {/* Right Sidebar Column */}
-            <div className="flex flex-col gap-8">
+            <div className="flex flex-col gap-4 md:gap-6">
               {/* Quick Actions */}
               <div>
                 <SectionHeader title="Quick Actions" />

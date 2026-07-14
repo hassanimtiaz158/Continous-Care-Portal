@@ -268,7 +268,10 @@ function ShuraApp() {
       reply.textContent = res.answer;
     } catch (err) {
       reply.style.color = "var(--rose)";
-      reply.textContent = err instanceof Error ? err.message : "Failed to connect to SHURA backend. AI assistance unavailable.";
+      reply.textContent =
+        err instanceof Error
+          ? err.message
+          : "Failed to connect to SHURA backend. AI assistance unavailable.";
     }
   }, [activePatient]);
 
@@ -289,7 +292,9 @@ function ShuraApp() {
       setBoardResult(result);
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : "Board unavailable — failed to connect to backend service.",
+        err instanceof Error
+          ? err.message
+          : "Board unavailable — failed to connect to backend service.",
       );
     }
   }, [activePatient, user]);

@@ -98,7 +98,7 @@ export function WorkspaceCanvas({
 
   return (
     <div
-      className={`flex-1 h-full overflow-y-auto px-8 py-12 scroll-smooth relative transition-colors duration-500 ${proveItMode ? "bg-void-3" : "bg-void"}`}
+      className={`flex-1 h-auto md:h-full overflow-visible md:overflow-y-auto p-4 md:p-6 lg:p-8 scroll-smooth relative transition-colors duration-500 ${proveItMode ? "bg-void-3" : "bg-void"}`}
     >
       {/* Prove It Mode Toggle */}
       <div className="absolute top-4 right-8 z-50">
@@ -130,7 +130,7 @@ export function WorkspaceCanvas({
         )}
       </AnimatePresence>
 
-      <div className="max-w-4xl mx-auto">
+      <div className="w-full">
         {/* 1. Clinical Evidence */}
         <WorkflowStageWrapper
           id="evidence"
@@ -208,7 +208,7 @@ export function WorkspaceCanvas({
         {isLocked && (
           <div className="mt-16 pt-16 border-t border-line">
             <h3 className="font-serif text-xl text-cream mb-6">Post-Decision Audit</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
               <AuditSummary sessionId={sessionId} />
               <ClinicalDiscussion
                 sessionId={sessionId}

@@ -18,6 +18,13 @@ from app.orchestrator import run_board, run_icd10_coding, get_review_queue
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
+# DashScope (Alibaba Cloud Model Studio) OpenAI-compatible REST endpoint.
+# Default is the international host; for a mainland-China DashScope key set
+# DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1 in .env.
+DASHSCOPE_BASE_URL = os.getenv(
+    "DASHSCOPE_BASE_URL", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+)
+
 app = FastAPI(title="Continuous Care Portal — Backend", version="0.1.0")
 
 _CORS_ORIGINS = [
@@ -320,7 +327,7 @@ async def board_run(req: BoardRunRequest):
 
     client = AsyncOpenAI(
         api_key=api_key,
-        base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        base_url=DASHSCOPE_BASE_URL,
     )
     try:
         result = await run_board(patient, client)
@@ -352,7 +359,7 @@ async def icd10_code(req: Icd10CodeRequest):
 
     client = AsyncOpenAI(
         api_key=api_key,
-        base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        base_url=DASHSCOPE_BASE_URL,
     )
     try:
         result, elapsed = await run_icd10_coding(
@@ -798,7 +805,7 @@ async def ask_shura(req: AskShuraRequest):
         # Offline/demo fallback — same behaviour as before this fix.
         return {"question": question, "answer": f"Based on your approved care plan: {p.edu}"}
 
-    client = AsyncOpenAI(api_key=api_key, base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
+    client = AsyncOpenAI(api_key=api_key, base_url=DASHSCOPE_BASE_URL)
     system = (
         "You are Shura, a patient-facing assistant. Answer the patient's "
         "question using ONLY the approved care plan and plain-language "

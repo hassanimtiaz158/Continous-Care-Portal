@@ -58,7 +58,7 @@ export function IntelligenceOverview({
   }, []);
 
   return (
-    <div className="flex flex-col gap-4 mb-8">
+    <div className="flex flex-col gap-4 mb-12">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard label="Total Patients" value={totalPatients} />
         <StatCard label="Critical Cases" value={criticalCount} highlight={criticalCount > 0} />

@@ -22,7 +22,7 @@ export function PriorityQueue({
 
   if (criticalPatients.length === 0) {
     return (
-      <div className="mb-8">
+      <div className="mb-12">
         <SectionHeader title="Priority Queue" subtitle="Cases requiring immediate attention" />
         <Card className="bg-void-2 border-line border-dashed">
           <CardContent className="p-8 text-center text-muted font-mono text-sm">
@@ -34,7 +34,7 @@ export function PriorityQueue({
   }
 
   return (
-    <div className="mb-8">
+    <div className="mb-12">
       <SectionHeader title="Priority Queue" subtitle="Cases requiring immediate attention" />
       <div className="flex flex-col gap-2">
         {criticalPatients.map((patient, i) => (
@@ -45,7 +45,7 @@ export function PriorityQueue({
             transition={{ delay: i * 0.05 }}
           >
             <Card className="bg-void-2 border-line hover:border-gold/30 hover:bg-void-3 transition-all group overflow-hidden">
-              <CardContent className="p-3 md:p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <CardContent className="p-4 md:p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                 <div className="flex items-center gap-4 flex-1">
                   <div className="w-10 h-10 rounded-full bg-void flex items-center justify-center border border-line text-cream font-serif text-sm">
                     {patient.name.substring(0, 2)}
@@ -83,7 +83,7 @@ export function PriorityQueue({
                       variant="outline"
                       size="sm"
                       onClick={() => onOpenPatient(patient)}
-                      className="h-8 text-xs font-mono uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="h-8 text-xs font-mono uppercase tracking-widest"
                     >
                       Open Case
                     </Button>

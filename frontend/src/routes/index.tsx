@@ -248,7 +248,7 @@ function ShuraApp() {
         setIntakeSubmitting(false);
       }
     },
-    [openPatient],
+    [openPatient, logActivity],
   );
 
   const logout = useCallback(() => {
@@ -328,7 +328,7 @@ function ShuraApp() {
           : "Board unavailable — failed to connect to backend service.",
       );
     }
-  }, [activePatient, user]);
+  }, [activePatient, user, logActivity]);
 
   const handleApprove = useCallback(async () => {
     if (!sessionId || !user) {
@@ -347,7 +347,7 @@ function ShuraApp() {
     } catch {
       toast.error("Failed to record decision.");
     }
-  }, [sessionId, user]);
+  }, [sessionId, user, activePatient?.id, logActivity]);
 
   const handleReject = useCallback(async () => {
     if (!sessionId || !user) {
@@ -366,7 +366,7 @@ function ShuraApp() {
     } catch {
       toast.error("Failed to record decision.");
     }
-  }, [sessionId, user]);
+  }, [sessionId, user, activePatient?.id, logActivity]);
 
   const roleLabel =
     role === "family" ? "Family Medicine" : role === "specialist" ? "Specialist" : "Patient";

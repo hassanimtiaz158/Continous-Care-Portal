@@ -127,7 +127,7 @@ export function ContextPanel({
 
         <div className="flex flex-col gap-6 flex-1">
           {/* Status block */}
-          <div className="p-4 rounded-xl border border-line bg-void flex flex-col gap-3">
+          <div className="p-5 rounded-xl border border-line bg-void flex flex-col gap-4">
             <div className="flex justify-between items-center">
               <span className="text-[10px] font-mono uppercase tracking-widest text-muted">
                 Clinical Status
@@ -258,7 +258,7 @@ export function ContextPanel({
           <CaseProgressTracker currentStage={currentStage} />
 
           {/* Active Care Team — derived server-side from real case data */}
-          <div className="p-4 rounded-xl border border-line bg-void flex flex-col gap-3">
+          <div className="p-5 rounded-xl border border-line bg-void flex flex-col gap-4">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <Users className="w-3.5 h-3.5 text-gold" />

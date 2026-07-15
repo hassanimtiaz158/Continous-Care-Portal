@@ -16,15 +16,8 @@ export function PhysicianDecision({
   isLocked,
   onExport,
 }: PhysicianDecisionProps) {
-  const [locking, setLocking] = useState(false);
-
   const handleSignOff = () => {
-    setLocking(true);
-    // Simulate signature animation sequence before triggering the actual callback
-    setTimeout(() => {
-      onApprove();
-      setLocking(false);
-    }, 1200); // Wait for animation
+    onApprove();
   };
 
   return (
@@ -69,27 +62,15 @@ export function PhysicianDecision({
               <Button
                 onClick={onReject}
                 variant="outline"
-                disabled={locking}
                 className="h-10 border-rose/30 text-rose hover:bg-rose/10 font-mono text-[10px] uppercase tracking-widest gap-2"
               >
                 <X className="w-3 h-3" /> Reject
               </Button>
               <Button
                 onClick={handleSignOff}
-                disabled={locking}
                 className="h-10 bg-gold text-void hover:bg-cream font-mono text-[10px] uppercase tracking-widest gap-2 min-w-[200px]"
               >
-                {locking ? (
-                  <motion.div
-                    animate={{ rotate: 360 }}
-                    transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
-                    className="w-3 h-3 border-2 border-void border-t-transparent rounded-full"
-                  />
-                ) : (
-                  <>
-                    <CheckCircle2 className="w-3 h-3" /> Sign Off & Lock Case
-                  </>
-                )}
+                <CheckCircle2 className="w-3 h-3" /> Sign Off & Lock Case
               </Button>
             </div>
           </>

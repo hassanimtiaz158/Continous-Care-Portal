@@ -78,7 +78,7 @@ export function AIBoardSection({
                   </div>
                 </div>
 
-                <div className="p-4 grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div className="p-5 md:p-6 grid grid-cols-1 md:grid-cols-4 gap-8">
                   {/* Confidence & Status */}
                   <div className="col-span-1 flex flex-col gap-4 border-r border-line pr-4">
                     <div>
@@ -164,7 +164,7 @@ export function AIBoardSection({
                 </div>
               </div>
 
-              <div className="p-4 grid grid-cols-1 md:grid-cols-4 gap-6">
+              <div className="p-5 md:p-6 grid grid-cols-1 md:grid-cols-4 gap-8">
                 <div className="col-span-1 flex flex-col gap-4 border-r border-line pr-4">
                   <div>
                     <span className="text-[9px] font-mono uppercase tracking-widest text-muted block mb-1">

@@ -27,7 +27,7 @@ export function WorkflowStageWrapper({
   return (
     <div
       className={cn(
-        "mb-8 border-l-[2px] pl-6 relative transition-all duration-500",
+        "mb-12 border-l-[2px] pl-6 relative transition-all duration-500",
         isPending
           ? "border-line opacity-40"
           : isActive

@@ -65,6 +65,7 @@ class ShuraPatient(BaseModel):
     ecg: dict
     gpNote: str
     chiefComplaint: str = ""
+    medications: list[str] = []
     agents: dict
     plan: str
     edu: str
@@ -74,17 +75,18 @@ _SHURA_PATIENTS: dict[str, ShuraPatient] = {}
 def _mk_p(*, id: str, name: str, age: int, sex: str, dx: str, status: str,
           screening: dict, glycemic: dict, vitals: dict, renal: dict,
           cardiac: dict, ecg: dict, gpNote: str, chiefComplaint: str = "",
-          agents: dict, plan: str, edu: str):
+          medications: list[str] | None = None, agents: dict, plan: str, edu: str):
     return ShuraPatient(
         id=id, name=name, age=age, sex=sex, dx=dx, status=status,
         screening=screening, glycemic=glycemic, vitals=vitals, renal=renal,
         cardiac=cardiac, ecg=ecg, gpNote=gpNote, chiefComplaint=chiefComplaint,
-        agents=agents, plan=plan, edu=edu,
+        medications=medications or [], agents=agents, plan=plan, edu=edu,
     )
 
 _sp = _mk_p
 _SHURA_PATIENTS["EG-4471"] = _sp(
     id="EG-4471", name="E.G.", age=58, sex="Female", dx="T2DM + HTN + CKD 3a", status="crit",
+    medications=["Metformin 500mg twice daily (evening doses missed per GP note)"],
     screening={"rbg":"196","hba1c":"8.4","bp":"148/92","date":"10/03/2026"},
     glycemic={"hba1c":"9.1","fbs":"168","rbs":"—"},
     vitals={"bp":"158/96","hr":"88","weight":"79","temp":"36.9"},
@@ -99,6 +101,7 @@ _SHURA_PATIENTS["EG-4471"] = _sp(
 )
 _SHURA_PATIENTS["EG-2290"] = _sp(
     id="EG-2290", name="M.H.", age=64, sex="Male", dx="T2DM, stable", status="stable",
+    medications=["Metformin 500mg twice daily"],
     screening={"rbg":"171","hba1c":"7.0","bp":"128/80","date":"22/01/2025"},
     glycemic={"hba1c":"6.8","fbs":"112","rbs":"—"},
     vitals={"bp":"126/78","hr":"74","weight":"82","temp":"36.7"},
@@ -113,6 +116,7 @@ _SHURA_PATIENTS["EG-2290"] = _sp(
 )
 _SHURA_PATIENTS["EG-3157"] = _sp(
     id="EG-3157", name="A.R.", age=47, sex="Female", dx="HTN, newly diagnosed", status="review",
+    medications=[],
     screening={"rbg":"104","hba1c":"5.5","bp":"152/94","date":"02/06/2026"},
     glycemic={"hba1c":"5.5","fbs":"96","rbs":"—"},
     vitals={"bp":"150/92","hr":"80","weight":"71","temp":"36.8"},
@@ -127,6 +131,7 @@ _SHURA_PATIENTS["EG-3157"] = _sp(
 )
 _SHURA_PATIENTS["EG-5502"] = _sp(
     id="EG-5502", name="N.F.", age=71, sex="Male", dx="CKD 3b + T2DM", status="crit",
+    medications=["Metformin 500mg twice daily (to be discontinued per nephrology)"],
     screening={"rbg":"210","hba1c":"8.9","bp":"160/98","date":"15/09/2024"},
     glycemic={"hba1c":"8.2","fbs":"176","rbs":"—"},
     vitals={"bp":"162/98","hr":"92","weight":"79","temp":"37.0"},
@@ -141,6 +146,7 @@ _SHURA_PATIENTS["EG-5502"] = _sp(
 )
 _SHURA_PATIENTS["EG-1183"] = _sp(
     id="EG-1183", name="Y.S.", age=39, sex="Female", dx="HTN, well controlled", status="stable",
+    medications=["Antihypertensive (specific agent not confirmed in record)"],
     screening={"rbg":"98","hba1c":"5.2","bp":"122/78","date":"11/11/2024"},
     glycemic={"hba1c":"5.2","fbs":"90","rbs":"—"},
     vitals={"bp":"120/76","hr":"70","weight":"64","temp":"36.6"},
@@ -155,6 +161,7 @@ _SHURA_PATIENTS["EG-1183"] = _sp(
 )
 _SHURA_PATIENTS["EG-6640"] = _sp(
     id="EG-6640", name="H.K.", age=55, sex="Male", dx="T2DM, pending board review", status="review",
+    medications=["Metformin 500mg twice daily (dose increase proposed)"],
     screening={"rbg":"188","hba1c":"8.0","bp":"138/88","date":"03/05/2026"},
     glycemic={"hba1c":"8.5","fbs":"160","rbs":"—"},
     vitals={"bp":"140/88","hr":"82","weight":"90","temp":"36.9"},
@@ -614,9 +621,161 @@ def transfer_to_board(patient_id: str):
     return {"status": "transferred", "patient_id": patient_id, "message": f"Case #{patient_id} sent to Specialist Board."}
 
 
+# ---------------------------------------------------------------------------
+# Active Care Team — derived SERVER-SIDE from real case data.
+#
+# Every agent's ``reason`` string is computed from the patient's actual
+# readings (BP, HbA1c, eGFR, medication list, chief complaint) — never a
+# static label. This matches Shura's anti-hallucination principle: the panel
+# must not assert an agent is engaged for a reason that isn't grounded in the
+# record.
+#
+# Activation rules:
+#   endocrinology  (amara)    <- endocrine dx / HbA1c >= 7.0
+#   cardiology     (rousseau) <- CV dx / systolic BP >= 140
+#   nephrology     (osei)     <- renal dx / eGFR < 60
+#   pharmacology               <- active medication list non-empty
+#   board chair                <- 2+ specialists active
+#   icd10 coding              <- always "pending" until the board confirms dx
+# ---------------------------------------------------------------------------
+
+def _build_care_team(p: ShuraPatient) -> dict:
+    dx_lower = (p.dx or "").lower()
+    meds = p.medications or []
+    scr = p.screening or {}
+    gly = p.glycemic or {}
+    vit = p.vitals or {}
+    ren = p.renal or {}
+
+    def _num(s):
+        try:
+            return float(str(s).replace("%", "").strip())
+        except Exception:
+            return None
+
+    def _bp(s):
+        try:
+            a, b = str(s).split("/")
+            return int(a), int(b)
+        except Exception:
+            return None, None
+
+    hba1c = _num(gly.get("hba1c"))
+    egfr = _num(ren.get("egfr"))
+    bp_now = vit.get("bp", "—/—")
+    v_sys, _ = _bp(bp_now)
+    last_updated = scr.get("date", "—")
+
+    # --- Activation (data-derived) ---
+    endo_active = ("dm" in dx_lower) or ("diabetes" in dx_lower) or (hba1c is not None and hba1c >= 7.0)
+    cardio_active = ("htn" in dx_lower) or ("hypertension" in dx_lower) or (v_sys is not None and v_sys >= 140)
+    nephro_active = (
+        ("ckd" in dx_lower) or ("renal" in dx_lower) or ("kidney" in dx_lower)
+        or (egfr is not None and egfr < 60)
+    )
+    pharm_active = len(meds) > 0
+
+    # --- Per-agent reason strings, all grounded in real data ---
+    rousseau_status = "active" if cardio_active else "pending"
+    rousseau_reason = (
+        f"Essential hypertension — BP {bp_now} mmHg (target <130/80); CV risk management."
+        if cardio_active else
+        f"No cardiovascular indication — BP {bp_now} mmHg within range and no hypertension in diagnosis."
+    )
+
+    amara_status = "active" if endo_active else "pending"
+    amara_reason = (
+        f"Type 2 diabetes — HbA1c {gly.get('hba1c', '—')}% (target <7.0%); glycemic control review required."
+        if endo_active else
+        f"No endocrine indication — HbA1c {gly.get('hba1c', '—')}% within range and no diabetes in diagnosis."
+    )
+
+    osei_status = "active" if nephro_active else "pending"
+    osei_reason = (
+        f"CKD — eGFR {ren.get('egfr', '—')} mL/min/1.73m²; renal-protective therapy indicated."
+        if nephro_active else
+        f"No renal indication — eGFR {ren.get('egfr', '—')} mL/min within range and no CKD in diagnosis."
+    )
+
+    pharm_status = "active" if pharm_active else "pending"
+    pharm_reason = (
+        f"Reviewing {len(meds)} active medication(s): {', '.join(meds)}."
+        if pharm_active else
+        "No active medications on file — pharmacology review not triggered."
+    )
+
+    cc = p.chiefComplaint or "—"
+    icd10_reason = (
+        f"Chief complaint logged: '{cc}'. ICD-10 coding queued at intake; "
+        f"pending board confirmation of final diagnosis."
+    )
+
+    agents = [
+        {
+            "agent_id": "rousseau",
+            "name": "Dr. Rousseau",
+            "specialty": "Cardiology — CV Risk",
+            "status": rousseau_status,
+            "reason": rousseau_reason,
+            "last_updated": last_updated if rousseau_status == "active" else "—",
+        },
+        {
+            "agent_id": "amara",
+            "name": "Dr. Amara",
+            "specialty": "Endocrinology — Glucose Control",
+            "status": amara_status,
+            "reason": amara_reason,
+            "last_updated": last_updated if amara_status == "active" else "—",
+        },
+        {
+            "agent_id": "osei",
+            "name": "Dr. Osei",
+            "specialty": "Nephrology — Kidney Function",
+            "status": osei_status,
+            "reason": osei_reason,
+            "last_updated": last_updated if osei_status == "active" else "—",
+        },
+        {
+            "agent_id": "pharmacology",
+            "name": "Pharmacology Agent",
+            "specialty": "Pharmacology — Drug Safety & Guideline Grounding",
+            "status": pharm_status,
+            "reason": pharm_reason,
+            "last_updated": last_updated if pharm_status == "active" else "—",
+        },
+        {
+            "agent_id": "icd10",
+            "name": "ICD-10 Coding Agent",
+            "specialty": "Clinical Coding — Chief Complaint to ICD-10",
+            "status": "pending",
+            "reason": icd10_reason,
+            "last_updated": "—",
+        },
+    ]
+
+    specialist_count = sum([endo_active, cardio_active, nephro_active])
+    board_chair_active = specialist_count >= 2
+
+    return {
+        "case_id": p.id,
+        "board_chair_active": board_chair_active,
+        "agents": agents,
+    }
+
+
+@app.get("/api/cases/{case_id}/care-team")
+def care_team(case_id: str):
+    """Return the active care team for a case, derived from real case data."""
+    p = _SHURA_PATIENTS.get(case_id.upper())
+    if p is None:
+        raise HTTPException(status_code=404, detail=f"Patient {case_id} not found")
+    return _build_care_team(p)
+
+
 class AskShuraRequest(BaseModel):
     patient_id: str
     question: str
+    agent: str | None = None
 
 
 @app.post("/api/board/ask-shura")
@@ -651,6 +810,29 @@ async def ask_shura(req: AskShuraRequest):
         f"Approved care plan: {p.plan}\n"
         f"Plain-language summary: {p.edu}"
     )
+    # Route the question to a specific agent when the UI requests it, so the
+    # answer reflects that specialist's perspective / on-file recommendation.
+    agent_ctx = ""
+    if req.agent:
+        if req.agent in ("endo", "card", "neph"):
+            ag = (p.agents or {}).get(req.agent)
+            if ag:
+                agent_ctx = (
+                    f"\n\nYou are responding specifically as the {req.agent} "
+                    f"specialist for this case. Your current recommendation on "
+                    f"file: {ag.get('rec', '')}"
+                )
+        elif req.agent == "pharmacology":
+            agent_ctx = (
+                "\n\nYou are responding as the Pharmacology agent. Focus on "
+                "medication safety, renal dosing, and guideline grounding."
+            )
+        elif req.agent == "board":
+            agent_ctx = (
+                f"\n\nYou are responding as the multi-specialist Board Chair. "
+                f"Consensus plan on file: {p.plan}"
+            )
+    system = system + agent_ctx
     try:
         response = await client.chat.completions.create(
             model="qwen-plus",

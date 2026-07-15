@@ -1,16 +1,13 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { StatCard } from "../shared/StatCard";
 import { motion } from "framer-motion";
+import { healthCheck } from "@/lib/api";
 import {
   PieChart,
   Pie,
   Cell,
   ResponsiveContainer,
   Tooltip,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
 } from "recharts";
 
 export function IntelligenceOverview({
@@ -44,6 +41,27 @@ export function IntelligenceOverview({
     }
   });
   const avgConfidence = confCount > 0 ? Math.round(totalConf / confCount) : 0;
+
+  // Real backend round-trip latency (replaces the old "7 days of data" placeholder)
+  const [latency, setLatency] = useState<string>("—");
+  useEffect(() => {
+    let alive = true;
+    const measure = async () => {
+      const start = Date.now();
+      try {
+        await healthCheck();
+        if (alive) setLatency(`${Date.now() - start}ms`);
+      } catch {
+        if (alive) setLatency("offline");
+      }
+    };
+    measure();
+    const id = setInterval(measure, 30000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, []);
 
   return (
     <div className="flex flex-col gap-4 mb-8">
@@ -92,14 +110,31 @@ export function IntelligenceOverview({
               </PieChart>
             </ResponsiveContainer>
           </div>
+          <div className="flex items-center justify-center gap-4 mt-2">
+            {statusData.map((entry) => (
+              <div key={entry.name} className="flex items-center gap-1.5">
+                <span
+                  className="inline-block h-2.5 w-2.5 rounded-sm"
+                  style={{ backgroundColor: entry.color }}
+                />
+                <span className="text-[10px] font-mono uppercase tracking-widest text-muted">
+                  {entry.name} {entry.value}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
 
         <div className="bg-void-2 border border-line p-4 h-64 flex flex-col justify-center items-center text-center">
           <h4 className="text-[10px] font-mono uppercase tracking-widest text-muted mb-2">
-            Board Processing Time
+            SHURA Core Latency
           </h4>
-          <p className="text-xs text-muted/70 max-w-[200px] font-mono leading-relaxed mt-4">
-            Processing history requires at least 7 days of clinical deliberation data to render.
+          <div className="text-3xl font-mono text-gold tracking-tight">
+            {latency}
+          </div>
+          <p className="text-[10px] text-muted/70 font-mono leading-relaxed mt-3 max-w-[200px]">
+            Live backend round-trip. Board deliberation streams in real time when
+            DASHSCOPE_API_KEY is configured.
           </p>
         </div>
       </div>

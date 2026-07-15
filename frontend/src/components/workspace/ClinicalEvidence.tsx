@@ -18,6 +18,17 @@ interface ClinicalEvidenceProps {
   hoveredMetric?: string | null;
 }
 
+// The mandatory Chief Complaint is the patient's own words at intake. Surface it
+// as "Reported Symptoms" so a critical case never shows an empty mandatory field,
+// and derive a Duration when the complaint text includes one (e.g. "for 3 weeks").
+function extractDuration(complaint?: string): string {
+  if (!complaint) return "";
+  const m = complaint.match(
+    /\bfor\s+(\d+\+?\s*(?:week|day|month|year|hr|hour)s?)\b/i,
+  );
+  return m ? m[1].trim() : "";
+}
+
 const SECTIONS: {
   id: "screening" | "glycemic" | "vitals" | "renal" | "cardiac" | "ecg";
   label: string;
@@ -107,7 +118,14 @@ export function ClinicalEvidence({
             </div>
             <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-px bg-line">
               {section.fields.map((field) => {
-                const val = (patient as any)[section.id]?.[field.key] || "";
+                let val = (patient as any)[section.id]?.[field.key] || "";
+                if (section.id === "screening" && !val) {
+                  if (field.key === "symptoms") {
+                    val = patient.chiefComplaint || "";
+                  } else if (field.key === "duration") {
+                    val = extractDuration(patient.chiefComplaint);
+                  }
+                }
                 const metricId = `${section.id}.${field.key}`;
                 const isHighlighted = proveItMode && hoveredMetric === metricId;
                 const isDimmed = proveItMode && hoveredMetric && !isHighlighted;

@@ -1,9 +1,11 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { PatientData } from "../../types/patient";
 import { WorkflowStage } from "../../types/board";
 import { CaseProgressTracker } from "./CaseProgressTracker";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { fetchCareTeam, CareTeamResponse } from "@/lib/api";
 import {
   ArrowLeft,
   Pill,
@@ -12,24 +14,89 @@ import {
   Stethoscope,
   TestTube,
   MessageSquare,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+// Maps the care-team agent_id (from the backend /care-team contract) to the
+// agent param the /ask-shura backend understands.
+const AGENT_TO_BACKEND: Record<string, string> = {
+  amara: "endo",
+  rousseau: "card",
+  osei: "neph",
+  pharmacology: "pharmacology",
+  icd10: "icd10",
+};
+
+const STATUS_DOT: Record<string, string> = {
+  active: "bg-gold",
+  pending: "bg-muted/40",
+  complete: "bg-teal",
+};
+
 interface ContextPanelProps {
   patient: PatientData;
+  user: { name: string };
+  roleLabel: string;
   onBack: () => void;
   currentStage: WorkflowStage;
-  onAskShura: () => void;
+  onAskShura: (question: string, agent?: string) => Promise<{ answer: string }>;
   dataCompleteness: number; // 0-100
 }
 
 export function ContextPanel({
   patient,
+  user,
+  roleLabel,
   onBack,
   currentStage,
   onAskShura,
   dataCompleteness,
 }: ContextPanelProps) {
+  const [careTeam, setCareTeam] = useState<CareTeamResponse | null>(null);
+  const [careTeamLoading, setCareTeamLoading] = useState(false);
+  const [careTeamError, setCareTeamError] = useState<string | null>(null);
+
+  // Active Care Team is derived server-side from real case data; refetch when
+  // the selected case changes.
+  useEffect(() => {
+    let cancelled = false;
+    setCareTeamLoading(true);
+    setCareTeamError(null);
+    fetchCareTeam(patient.id)
+      .then((data) => {
+        if (!cancelled) setCareTeam(data);
+      })
+      .catch((e) => {
+        if (!cancelled) setCareTeamError(e?.message || "Failed to load care team");
+      })
+      .finally(() => {
+        if (!cancelled) setCareTeamLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [patient.id]);
+
+  const [askText, setAskText] = useState("");
+  const [reply, setReply] = useState<string | null>(null);
+  const [asking, setAsking] = useState(false);
+
+  const ask = async (agentKey?: string) => {
+    const q = askText.trim();
+    if (!q || asking) return;
+    setAsking(true);
+    setReply("Thinking…");
+    try {
+      const res = await onAskShura(q, agentKey);
+      setReply(res?.answer ?? "");
+    } catch {
+      setReply(`Based on your approved care plan: ${patient.edu}`);
+    } finally {
+      setAsking(false);
+    }
+  };
+
   return (
     <div className="w-full md:w-80 shrink-0 h-auto md:h-full overflow-visible md:overflow-y-auto border-t md:border-t-0 md:border-l border-line bg-void-2 flex flex-col relative z-20">
       <div className="p-6 pb-0 sticky top-0 bg-void-2/90 backdrop-blur-md z-10">
@@ -190,14 +257,121 @@ export function ContextPanel({
 
           <CaseProgressTracker currentStage={currentStage} />
 
-          <div className="mt-auto pt-6 border-t border-line">
-            <Button
-              variant="outline"
-              className="w-full text-gold border-gold/30 hover:bg-gold/5 font-mono uppercase tracking-widest text-xs h-10"
-              onClick={onAskShura}
-            >
-              Ask Shura
-            </Button>
+          {/* Active Care Team — derived server-side from real case data */}
+          <div className="p-4 rounded-xl border border-line bg-void flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Users className="w-3.5 h-3.5 text-gold" />
+                <span className="text-[10px] font-mono uppercase tracking-widest text-gold">
+                  Active Care Team
+                </span>
+              </div>
+              {careTeam?.board_chair_active && (
+                <span className="text-[9px] font-mono uppercase tracking-widest text-teal border border-teal/30 px-1.5 py-0.5 rounded">
+                  Board Chair Active
+                </span>
+              )}
+            </div>
+
+            {careTeamLoading && (
+              <p className="text-[11px] text-muted leading-snug">Loading care team…</p>
+            )}
+            {careTeamError && (
+              <p className="text-[11px] text-rose leading-snug">{careTeamError}</p>
+            )}
+            {careTeam && (
+              <div className="flex flex-col gap-2.5">
+                {careTeam.agents.map((m) => {
+                  const isPending = m.status === "pending";
+                  return (
+                    <div
+                      key={m.agent_id}
+                      className={cn("flex gap-2.5", isPending && "opacity-50")}
+                    >
+                      <div className="shrink-0 mt-1.5">
+                        <span
+                          className={cn(
+                            "block w-2 h-2 rounded-full",
+                            STATUS_DOT[m.status] || "bg-muted/40",
+                          )}
+                          aria-label={`status: ${m.status}`}
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-baseline gap-1.5 flex-wrap">
+                          <span className="text-xs font-medium text-cream">{m.name}</span>
+                          <span className="text-[9px] font-mono uppercase tracking-widest text-muted">
+                            {m.specialty}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-muted leading-snug">{m.reason}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="mt-auto pt-6 border-t border-line flex flex-col gap-3">
+            <div className="text-[10px] font-mono uppercase tracking-widest text-muted">
+              Ask the care team
+            </div>
+            <Input
+              value={askText}
+              onChange={(e) => setAskText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") ask();
+              }}
+              placeholder="Ask about this case…"
+              className="h-9 text-sm bg-void border-line text-cream focus:ring-1 focus:ring-gold/50"
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={asking}
+                className="border-gold/30 text-gold hover:bg-gold/5 text-[10px] uppercase font-mono tracking-widest h-8"
+                onClick={() => ask()}
+              >
+                Ask Shura
+              </Button>
+              {careTeam?.board_chair_active && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={asking}
+                  className="border-gold/30 text-gold hover:bg-gold/5 text-[10px] uppercase font-mono tracking-widest h-8"
+                  onClick={() => ask("board")}
+                >
+                  Ask Board
+                </Button>
+              )}
+              {careTeam?.agents
+                .filter((m) => m.status === "active")
+                .map((m) => (
+                  <Button
+                    key={m.agent_id}
+                    variant="outline"
+                    size="sm"
+                    disabled={asking}
+                    className="border-line text-muted hover:text-cream hover:border-gold/30 hover:bg-void-3 text-[10px] uppercase font-mono tracking-widest h-8"
+                    onClick={() => ask(AGENT_TO_BACKEND[m.agent_id])}
+                  >
+                    {m.name.includes("Agent")
+                      ? `Ask ${m.agent_id === "pharmacology" ? "Pharmacology" : "ICD-10"}`
+                      : `Ask ${m.name.split(" ")[1]}`}
+                  </Button>
+                ))}
+            </div>
+            {reply && (
+              <div className="text-[11px] leading-relaxed text-cream bg-void border border-line rounded-md p-2.5 max-h-40 overflow-y-auto">
+                {reply}
+              </div>
+            )}
+            <div className="text-[9px] font-mono uppercase tracking-widest text-muted/60">
+              Consulting: {user.name} · {roleLabel}
+            </div>
           </div>
         </div>
       </div>

@@ -8,7 +8,7 @@ import { ActivityFeed } from "./ActivityFeed";
 import { AIInsight } from "./AIInsight";
 import { Button } from "../ui/button";
 import { SectionHeader } from "../shared/SectionHeader";
-import { Plus, Users, Search as SearchIcon, FileClock } from "lucide-react";
+import { Plus, Users } from "lucide-react";
 import { motion } from "framer-motion";
 import { PatientData } from "../../types/patient";
 
@@ -21,6 +21,7 @@ interface ClinicalOverviewProps {
   onOpenPatient: (p: PatientData) => void;
   onLogout: () => void;
   onAddPatient: () => void;
+  activity?: { time: string; text: string }[];
 }
 
 export function ClinicalOverview({
@@ -32,6 +33,7 @@ export function ClinicalOverview({
   onOpenPatient,
   onLogout,
   onAddPatient,
+  activity = [],
 }: ClinicalOverviewProps) {
   const criticalCount = patients.filter((p) => p.status === "crit").length;
   const reviewCount = patients.filter((p) => p.status === "review").length;
@@ -118,8 +120,9 @@ export function ClinicalOverview({
                 totalPatients={patients.length}
                 criticalCount={criticalCount}
                 reviewCount={reviewCount}
+                patients={patients}
               />
-              <ActivityFeed />
+              <ActivityFeed events={activity} />
             </div>
 
             {/* Right Sidebar Column */}
@@ -135,30 +138,6 @@ export function ClinicalOverview({
                   >
                     <Plus className="w-5 h-5 text-gold" />
                     <span className="text-xs">New Intake</span>
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled
-                    className="h-20 flex-col gap-2 bg-void-2 border-line opacity-50 cursor-not-allowed"
-                  >
-                    <Users className="w-5 h-5 text-muted" />
-                    <span className="text-xs">Full Roster</span>
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled
-                    className="h-20 flex-col gap-2 bg-void-2 border-line opacity-50 cursor-not-allowed"
-                  >
-                    <SearchIcon className="w-5 h-5 text-muted" />
-                    <span className="text-xs">Search</span>
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled
-                    className="h-20 flex-col gap-2 bg-void-2 border-line opacity-50 cursor-not-allowed"
-                  >
-                    <FileClock className="w-5 h-5 text-muted" />
-                    <span className="text-xs">Last Session</span>
                   </Button>
                 </div>
               </div>

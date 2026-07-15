@@ -51,7 +51,11 @@ export function ClinicalDiscussion({ sessionId, messages, onSend }: ClinicalDisc
               className={`flex flex-col max-w-[85%] ${msg.role === "user" ? "self-end items-end" : "self-start items-start"}`}
             >
               <span className="text-[9px] font-mono uppercase tracking-widest text-muted mb-1 px-1">
-                {msg.role === "user" ? "Physician" : msg.role === "assistant" ? "Board" : msg.role}
+                {msg.role === "user"
+                  ? "Physician"
+                  : msg.role === "assistant"
+                    ? "Board"
+                    : msg.role.charAt(0).toUpperCase() + msg.role.slice(1)}
               </span>
               <div
                 className={`p-2 px-3 text-xs leading-relaxed ${msg.role === "user" ? "bg-void border border-line text-cream" : "bg-void-3 border border-line text-cream"}`}

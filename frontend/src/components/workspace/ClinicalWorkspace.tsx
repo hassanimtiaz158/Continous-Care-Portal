@@ -12,7 +12,7 @@ interface ClinicalWorkspaceProps {
   role: Role;
   roleLabel: string;
   onBack: () => void;
-  onAskShura: () => void;
+  onAskShura: (question: string, agent?: string) => Promise<{ answer: string }>;
   onRunBoard: () => Promise<void>;
   onApprove: () => void;
   onReject: () => void;
@@ -71,18 +71,20 @@ export function ClinicalWorkspace({
     setIsRunningBoard(false);
   };
 
+  // Backend chat rows use {sender_role, text}; the UI expects {role, content}.
+  const toUiMessages = (msgs: any[]) =>
+    (msgs || []).map((m) => ({ role: m.sender_role, content: m.text }));
+
   // Chat polling
   useEffect(() => {
     if (!sessionId) return;
     fetchChat(patient.id)
-      .then((msgs) => {
-        if (msgs) setChatMessages(msgs);
-      })
+      .then((msgs) => setChatMessages(toUiMessages(msgs)))
       .catch(console.error);
 
     const interval = setInterval(async () => {
       const msgs = await fetchChat(patient.id);
-      if (msgs) setChatMessages(msgs);
+      setChatMessages(toUiMessages(msgs));
     }, 3000);
     return () => clearInterval(interval);
   }, [patient.id, sessionId]);
@@ -93,7 +95,7 @@ export function ClinicalWorkspace({
     setChatMessages((prev) => [...prev, optimistic]);
     await sendChat(patient.id, user.name, role, text);
     const msgs = await fetchChat(patient.id);
-    if (msgs) setChatMessages(msgs);
+    setChatMessages(toUiMessages(msgs));
   };
 
   return (
@@ -118,6 +120,8 @@ export function ClinicalWorkspace({
       />
       <ContextPanel
         patient={patient}
+        user={user}
+        roleLabel={roleLabel}
         onBack={onBack}
         currentStage={stage}
         onAskShura={onAskShura}

@@ -98,6 +98,16 @@ function ShuraApp() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [boardResult, setBoardResult] = useState<BoardResult | null>(null);
   const [proveItMode, setProveItMode] = useState(false);
+  const [activity, setActivity] = useState<{ time: string; text: string }[]>([]);
+  const logActivity = useCallback((text: string) => {
+    setActivity((prev) => [
+      ...prev,
+      {
+        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        text,
+      },
+    ]);
+  }, []);
 
   useEffect(() => {
     setPatientsLoading(true);
@@ -117,6 +127,11 @@ function ShuraApp() {
           const full = await Promise.all(list.map((p) => fetchPatient(p.id).catch(() => null)));
           const valid = full.filter(Boolean) as PatientData[];
           setAllPatients(valid);
+          logActivity(
+            valid.length > 0
+              ? `Synced ${valid.length} patients from SHURA registry`
+              : "Registry synced — no patients on file",
+          );
           if (user && user.role === "patient" && !activePatient && valid.length > 0) {
             setActivePatient(valid[0]);
           }
@@ -216,6 +231,7 @@ function ShuraApp() {
         });
         setAllPatients((prev) => [...prev, created as PatientData]);
         setIntakeOpen(false);
+        logActivity(`New intake registered: ${(created as PatientData).name} (${(created as PatientData).id})`);
         openPatient(created as PatientData);
       } catch (err) {
         setIntakeError(err instanceof Error ? err.message : "Failed to create patient.");
@@ -255,25 +271,25 @@ function ShuraApp() {
     [],
   );
 
-  const handleAskShura = useCallback(async () => {
-    const input = document.getElementById("askInput") as HTMLInputElement;
-    const reply = document.getElementById("askReply");
-    if (!input || !reply || !activePatient) return;
-    const q = input.value.trim();
-    if (!q) return;
-    reply.style.display = "block";
-    reply.textContent = "Thinking...";
-    try {
-      const res = await apiAskShura(activePatient.id, q);
-      reply.textContent = res.answer;
-    } catch (err) {
-      reply.style.color = "var(--rose)";
-      reply.textContent =
-        err instanceof Error
-          ? err.message
-          : "Failed to connect to SHURA backend. AI assistance unavailable.";
-    }
-  }, [activePatient]);
+  const handleAskShura = useCallback(
+    async (question: string, agent?: string): Promise<{ answer: string }> => {
+      if (!activePatient) return { answer: "" };
+      const q = question.trim();
+      if (!q) return { answer: "" };
+      try {
+        const res = await apiAskShura(activePatient.id, q, agent);
+        return { answer: res.answer };
+      } catch (err) {
+        return {
+          answer:
+            err instanceof Error
+              ? err.message
+              : "Failed to connect to SHURA backend. AI assistance unavailable.",
+        };
+      }
+    },
+    [activePatient],
+  );
 
   const handleTransferBoard = useCallback(
     (btn: HTMLElement) => {
@@ -290,6 +306,7 @@ function ShuraApp() {
       const result = await runBoard(activePatient.id);
       setSessionId(result.session_id);
       setBoardResult(result);
+      logActivity(`Specialist board convened for ${activePatient.id}`);
     } catch (err) {
       toast.error(
         err instanceof Error
@@ -312,6 +329,7 @@ function ShuraApp() {
         physician_note: "Plan approved and released to Family Medicine.",
       });
       toast.success("Plan approved and released to Family Medicine.");
+      logActivity(`Plan approved for ${activePatient?.id} by ${user.name}`);
     } catch {
       toast.error("Failed to record decision.");
     }
@@ -330,6 +348,7 @@ function ShuraApp() {
         physician_note: "Plan rejected — returned to Specialist Board.",
       });
       toast.success("Plan rejected — returned to Specialist Board.");
+      logActivity(`Plan rejected for ${activePatient?.id} by ${user.name}`);
     } catch {
       toast.error("Failed to record decision.");
     }
@@ -431,6 +450,7 @@ function ShuraApp() {
             onOpenPatient={openPatient}
             onLogout={logout}
             onAddPatient={() => setIntakeOpen(true)}
+            activity={activity}
           />
         )}
 

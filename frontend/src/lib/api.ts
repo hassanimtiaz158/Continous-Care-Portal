@@ -53,11 +53,11 @@ export async function transferToBoard(patientId: string) {
   return res.json();
 }
 
-export async function askShura(patientId: string, question: string) {
+export async function askShura(patientId: string, question: string, agent?: string) {
   const res = await fetch(`${API_BASE}/api/board/ask-shura`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ patient_id: patientId, question }),
+    body: JSON.stringify({ patient_id: patientId, question, agent: agent ?? null }),
   });
   if (!res.ok) throw new Error("Ask Shura failed");
   return res.json();
@@ -168,6 +168,30 @@ export async function fetchGroundingValidation(patientId: string) {
 export async function fetchAuditLog(patientId: string) {
   const res = await fetch(`${API_BASE}/api/patients/${patientId}/audit-log`);
   if (!res.ok) throw new Error("Audit log not found");
+  return res.json();
+}
+
+// ---- Active Care Team (derived server-side from real case data) ----
+export type CareTeamAgentStatus = "active" | "pending" | "complete";
+
+export interface CareTeamAgent {
+  agent_id: string;
+  name: string;
+  specialty: string;
+  status: CareTeamAgentStatus;
+  reason: string;
+  last_updated: string;
+}
+
+export interface CareTeamResponse {
+  case_id: string;
+  board_chair_active: boolean;
+  agents: CareTeamAgent[];
+}
+
+export async function fetchCareTeam(caseId: string): Promise<CareTeamResponse> {
+  const res = await fetch(`${API_BASE}/api/cases/${caseId}/care-team`);
+  if (!res.ok) throw new Error(`Care team for ${caseId} not found`);
   return res.json();
 }
 

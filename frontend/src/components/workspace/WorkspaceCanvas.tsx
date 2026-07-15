@@ -15,7 +15,7 @@ import { motion, AnimatePresence } from "framer-motion";
 interface WorkspaceCanvasProps {
   patient: PatientData;
   onFieldChange: (
-    section: "screening" | "glycemic" | "vitals" | "renal" | "cardiac" | "ecg",
+    section: "screening" | "glycemic" | "vitals" | "renal" | "cardiac" | "ecg" | "chiefComplaint",
     field: string,
     value: string,
   ) => void;

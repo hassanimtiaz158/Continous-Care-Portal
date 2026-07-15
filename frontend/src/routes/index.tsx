@@ -83,7 +83,14 @@ function ShuraApp() {
     }
     return "cover";
   });
-  const [role, setRole] = useState<Role>("family");
+  const [role, setRole] = useState<Role>(() => {
+    try {
+      const saved = localStorage.getItem("shura_user");
+      return saved ? JSON.parse(saved).role : "family";
+    } catch {
+      return "family";
+    }
+  });
   const [user, setUser] = useState<{ name: string; id: string; role: Role } | null>(() => {
     const saved = localStorage.getItem("shura_user");
     return saved ? JSON.parse(saved) : null;
@@ -231,7 +238,9 @@ function ShuraApp() {
         });
         setAllPatients((prev) => [...prev, created as PatientData]);
         setIntakeOpen(false);
-        logActivity(`New intake registered: ${(created as PatientData).name} (${(created as PatientData).id})`);
+        logActivity(
+          `New intake registered: ${(created as PatientData).name} (${(created as PatientData).id})`,
+        );
         openPatient(created as PatientData);
       } catch (err) {
         setIntakeError(err instanceof Error ? err.message : "Failed to create patient.");
@@ -257,13 +266,18 @@ function ShuraApp() {
 
   const handleFieldChange = useCallback(
     (
-      section: "screening" | "glycemic" | "vitals" | "renal" | "cardiac" | "ecg",
+      section: "screening" | "glycemic" | "vitals" | "renal" | "cardiac" | "ecg" | "chiefComplaint",
       field: string,
       value: string,
     ) => {
       setActivePatient((prev) => {
         if (!prev) return prev;
-        const updated = { ...prev, [section]: { ...prev[section], [field]: value } };
+        let updated;
+        if (section === "chiefComplaint") {
+          updated = { ...prev, chiefComplaint: value };
+        } else {
+          updated = { ...prev, [section]: { ...(prev as any)[section], [field]: value } };
+        }
         setAllPatients((list) => list.map((p) => (p.id === updated.id ? updated : p)));
         return updated;
       });

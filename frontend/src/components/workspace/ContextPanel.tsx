@@ -276,18 +276,13 @@ export function ContextPanel({
             {careTeamLoading && (
               <p className="text-[11px] text-muted leading-snug">Loading care team…</p>
             )}
-            {careTeamError && (
-              <p className="text-[11px] text-rose leading-snug">{careTeamError}</p>
-            )}
+            {careTeamError && <p className="text-[11px] text-rose leading-snug">{careTeamError}</p>}
             {careTeam && (
               <div className="flex flex-col gap-2.5">
                 {careTeam.agents.map((m) => {
                   const isPending = m.status === "pending";
                   return (
-                    <div
-                      key={m.agent_id}
-                      className={cn("flex gap-2.5", isPending && "opacity-50")}
-                    >
+                    <div key={m.agent_id} className={cn("flex gap-2.5", isPending && "opacity-50")}>
                       <div className="shrink-0 mt-1.5">
                         <span
                           className={cn(

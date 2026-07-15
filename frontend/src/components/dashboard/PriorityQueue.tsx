@@ -70,13 +70,13 @@ export function PriorityQueue({
                     <span className="text-[9px] uppercase tracking-widest text-muted font-mono">
                       Consensus
                     </span>
-                    <AIStatusBadge status={patient.status === "crit" ? "conflict" : "complete"} />
+                    <AIStatusBadge status="idle" />
                   </div>
                   <div className="flex flex-col gap-1 min-w-[100px]">
                     <span className="text-[9px] uppercase tracking-widest text-muted font-mono">
                       Confidence
                     </span>
-                    <ConfidenceMeter score={patient.status === "crit" ? 65 : 92} />
+                    <span className="text-sm font-mono text-muted">--</span>
                   </div>
                   <div className="shrink-0">
                     <Button

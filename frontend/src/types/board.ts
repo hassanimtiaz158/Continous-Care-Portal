@@ -32,6 +32,12 @@ export interface BoardResult {
     priority_actions: string[];
     conflicts: string[];
   };
+  pharmacology_result?: {
+    risk_level: string;
+    findings: SpecialistFinding[];
+    recommendation: string;
+  };
+  pharmacology_confidence?: number;
   confidence_scores: Record<string, number>;
   data_completeness: number;
 }

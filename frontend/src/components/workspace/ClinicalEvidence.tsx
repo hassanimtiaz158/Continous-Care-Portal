@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 interface ClinicalEvidenceProps {
   patient: PatientData;
   onFieldChange: (
-    section: "screening" | "glycemic" | "vitals" | "renal" | "cardiac" | "ecg",
+    section: "screening" | "glycemic" | "vitals" | "renal" | "cardiac" | "ecg" | "chiefComplaint",
     field: string,
     value: string,
   ) => void;
@@ -18,19 +18,8 @@ interface ClinicalEvidenceProps {
   hoveredMetric?: string | null;
 }
 
-// The mandatory Chief Complaint is the patient's own words at intake. Surface it
-// as "Reported Symptoms" so a critical case never shows an empty mandatory field,
-// and derive a Duration when the complaint text includes one (e.g. "for 3 weeks").
-function extractDuration(complaint?: string): string {
-  if (!complaint) return "";
-  const m = complaint.match(
-    /\bfor\s+(\d+\+?\s*(?:week|day|month|year|hr|hour)s?)\b/i,
-  );
-  return m ? m[1].trim() : "";
-}
-
 const SECTIONS: {
-  id: "screening" | "glycemic" | "vitals" | "renal" | "cardiac" | "ecg";
+  id: "chiefComplaint" | "glycemic" | "vitals" | "renal" | "cardiac" | "ecg";
   label: string;
   fields: { key: string; label: string }[];
 }[] = [
@@ -45,12 +34,9 @@ const SECTIONS: {
     ],
   },
   {
-    id: "screening",
+    id: "chiefComplaint",
     label: "Initial Screening",
-    fields: [
-      { key: "symptoms", label: "Reported Symptoms" },
-      { key: "duration", label: "Duration" },
-    ],
+    fields: [{ key: "text", label: "Reported Symptoms" }],
   },
   {
     id: "glycemic",
@@ -96,7 +82,10 @@ export function ClinicalEvidence({
   return (
     <div className="flex flex-col gap-px bg-line border-y border-line">
       {SECTIONS.map((section) => {
-        const hasData = section.fields.some((f) => patient[section.id]?.[f.key]);
+        const hasData =
+          section.id === "chiefComplaint"
+            ? !!patient.chiefComplaint
+            : section.fields.some((f) => (patient as any)[section.id]?.[f.key]);
 
         return (
           <div
@@ -118,14 +107,10 @@ export function ClinicalEvidence({
             </div>
             <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-px bg-line">
               {section.fields.map((field) => {
-                let val = (patient as any)[section.id]?.[field.key] || "";
-                if (section.id === "screening" && !val) {
-                  if (field.key === "symptoms") {
-                    val = patient.chiefComplaint || "";
-                  } else if (field.key === "duration") {
-                    val = extractDuration(patient.chiefComplaint);
-                  }
-                }
+                const val =
+                  section.id === "chiefComplaint"
+                    ? patient.chiefComplaint || ""
+                    : (patient as any)[section.id]?.[field.key] || "";
                 const metricId = `${section.id}.${field.key}`;
                 const isHighlighted = proveItMode && hoveredMetric === metricId;
                 const isDimmed = proveItMode && hoveredMetric && !isHighlighted;

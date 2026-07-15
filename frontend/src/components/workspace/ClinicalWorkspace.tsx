@@ -18,7 +18,7 @@ interface ClinicalWorkspaceProps {
   onReject: () => void;
   sessionId: string | null;
   onFieldChange: (
-    section: "screening" | "glycemic" | "vitals" | "renal" | "cardiac" | "ecg",
+    section: "screening" | "glycemic" | "vitals" | "renal" | "cardiac" | "ecg" | "chiefComplaint",
     field: string,
     value: string,
   ) => void;

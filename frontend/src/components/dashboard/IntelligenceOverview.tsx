@@ -2,13 +2,7 @@ import React, { useEffect, useState } from "react";
 import { StatCard } from "../shared/StatCard";
 import { motion } from "framer-motion";
 import { healthCheck } from "@/lib/api";
-import {
-  PieChart,
-  Pie,
-  Cell,
-  ResponsiveContainer,
-  Tooltip,
-} from "recharts";
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 
 export function IntelligenceOverview({
   totalPatients,
@@ -72,7 +66,7 @@ export function IntelligenceOverview({
         {avgConfidence > 0 ? (
           <StatCard label="Avg AI Confidence" value={`${avgConfidence}%`} />
         ) : (
-          <StatCard label="Avg AI Confidence" value="--" />
+          <StatCard label="Avg AI Confidence" value="N/A" />
         )}
       </div>
 
@@ -129,12 +123,10 @@ export function IntelligenceOverview({
           <h4 className="text-[10px] font-mono uppercase tracking-widest text-muted mb-2">
             SHURA Core Latency
           </h4>
-          <div className="text-3xl font-mono text-gold tracking-tight">
-            {latency}
-          </div>
+          <div className="text-3xl font-mono text-gold tracking-tight">{latency}</div>
           <p className="text-[10px] text-muted/70 font-mono leading-relaxed mt-3 max-w-[200px]">
-            Live backend round-trip. Board deliberation streams in real time when
-            DASHSCOPE_API_KEY is configured.
+            Live backend round-trip. Board deliberation streams in real time when DASHSCOPE_API_KEY
+            is configured.
           </p>
         </div>
       </div>

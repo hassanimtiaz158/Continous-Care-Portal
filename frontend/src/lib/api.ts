@@ -201,3 +201,52 @@ export async function healthCheck() {
   if (!res.ok) throw new Error("Backend unavailable");
   return res.json();
 }
+
+// ---- Referral (derived server-side from real case data) ----
+export type ReferralStatus =
+  | "not_required"
+  | "recommended"
+  | "referred"
+  | "declined";
+
+export interface ReferralResponse {
+  case_id: string;
+  referral_status: ReferralStatus;
+  referral_reason: string | null;
+  referred_by: string | null;
+  referred_to: string | null;
+  referred_at: string | null;
+  system_triggered: boolean;
+  note?: string | null;
+}
+
+export async function fetchReferral(caseId: string): Promise<ReferralResponse> {
+  const res = await fetch(`${API_BASE}/api/cases/${caseId}/referral`);
+  if (!res.ok) throw new Error(`Referral status for ${caseId} not found`);
+  return res.json();
+}
+
+export async function setReferral(
+  caseId: string,
+  decision: "referred" | "declined",
+  opts?: { referred_by?: string; referred_to?: string; note?: string },
+): Promise<ReferralResponse> {
+  const res = await fetch(`${API_BASE}/api/cases/${caseId}/referral`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      decision,
+      referred_by: opts?.referred_by,
+      referred_to: opts?.referred_to,
+      note: opts?.note,
+    }),
+  });
+  if (!res.ok) throw new Error("Referral action failed");
+  return res.json();
+}
+
+export async function fetchReferralLog(caseId: string) {
+  const res = await fetch(`${API_BASE}/api/cases/${caseId}/referral-log`);
+  if (!res.ok) throw new Error("Referral log not found");
+  return res.json();
+}

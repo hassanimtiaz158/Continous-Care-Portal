@@ -10,12 +10,37 @@ import {
   createPatient,
   fetchChat,
   sendChat,
+  fetchReferral,
+  ReferralResponse,
 } from "../lib/api";
 import { LandingPage } from "../components/landing/LandingPage";
 import { ClinicalOverview } from "../components/dashboard/ClinicalOverview";
 import { ClinicalWorkspace } from "../components/workspace/ClinicalWorkspace";
 import { CommandPalette } from "../components/shared/CommandPalette";
 import { Toaster, toast } from "sonner";
+
+/**
+ * Fixed care-team roster for login. These are REAL HUMAN physicians who review
+ * the AI's output — they must NOT collide with the AI agent names
+ * (Rousseau / Osei / Amara), which are separate.
+ *
+ * TODO (team): paste the final confirmed human roster here. Names + IDs + roles
+ * are placeholders for now; login validates the typed ID against `id`.
+ */
+interface Clinician {
+  id: string;
+  name: string;
+  role: Role;
+  specialty: string;
+}
+
+const ROSTER: Clinician[] = [
+  { id: "PC-001", name: "Dr. Nosa Bennett", role: "family", specialty: "Primary Care" },
+  { id: "PC-002", name: "Dr. Amara Okoye", role: "family", specialty: "Primary Care" },
+  { id: "CARD-001", name: "Dr. Lena Fischer", role: "specialist", specialty: "Cardiology" },
+  { id: "NEPH-001", name: "Dr. Kwame Mensah", role: "specialist", specialty: "Nephrology" },
+  { id: "ENDO-001", name: "Dr. Priya Nair", role: "specialist", specialty: "Endocrinology" },
+];
 
 export const Route = createFileRoute("/")({
   component: ShuraApp,
@@ -98,10 +123,22 @@ function ShuraApp() {
   const [activePatient, setActivePatient] = useState<PatientData | null>(null);
   const [activePage, setActivePage] = useState(1);
   const [loginErr, setLoginErr] = useState(false);
+  const [clinicianId, setClinicianId] = useState<string>("");
+  const [loginTypedId, setLoginTypedId] = useState<string>("");
+  const [openedCases, setOpenedCases] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      return JSON.parse(localStorage.getItem("shura_opened") || "[]");
+    } catch {
+      return [];
+    }
+  });
   const [qdOpen, setQdOpen] = useState(false);
   const [allPatients, setAllPatients] = useState<PatientData[]>([]);
   const [patientsLoading, setPatientsLoading] = useState(true);
   const [patientsError, setPatientsError] = useState(false);
+  const [referralMap, setReferralMap] = useState<Record<string, ReferralResponse>>({});
+  const [chatMap, setChatMap] = useState<Record<string, any[]>>({});
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [boardResult, setBoardResult] = useState<BoardResult | null>(null);
   const [proveItMode, setProveItMode] = useState(false);
@@ -114,6 +151,10 @@ function ShuraApp() {
         text,
       },
     ]);
+  }, []);
+
+  const handleReferralChange = useCallback((id: string, data: ReferralResponse) => {
+    setReferralMap((prev) => ({ ...prev, [id]: data }));
   }, []);
 
   useEffect(() => {
@@ -134,6 +175,24 @@ function ShuraApp() {
           const full = await Promise.all(list.map((p) => fetchPatient(p.id).catch(() => null)));
           const valid = full.filter(Boolean) as PatientData[];
           setAllPatients(valid);
+          const refs = await Promise.all(
+            valid.map((p) => fetchReferral(p.id).catch(() => null)),
+          );
+          const map: Record<string, ReferralResponse> = {};
+          valid.forEach((p, i) => {
+            if (refs[i]) map[p.id] = refs[i] as ReferralResponse;
+          });
+          setReferralMap(map);
+          const chats = await Promise.all(
+            valid.map((p) => fetchChat(p.id).catch(() => null)),
+          );
+          const cmap: Record<string, any[]> = {};
+          valid.forEach((p, i) => {
+            if (chats[i] && Array.isArray(chats[i]) && chats[i].length > 0) {
+              cmap[p.id] = chats[i] as any[];
+            }
+          });
+          setChatMap(cmap);
           logActivity(
             valid.length > 0
               ? `Synced ${valid.length} patients from SHURA registry`
@@ -154,32 +213,51 @@ function ShuraApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const selectRole = useCallback((r: Role) => setRole(r), []);
+  const selectRole = useCallback((r: Role) => {
+    setRole(r);
+    setClinicianId("");
+    setLoginTypedId("");
+  }, []);
   const enterApp = useCallback(() => setScreen("login"), []);
 
   const doLogin = useCallback(() => {
-    const nameInput = document.getElementById("loginName") as HTMLInputElement;
-    const idInput = document.getElementById("loginId") as HTMLInputElement;
-    const name = nameInput?.value?.trim() || "";
-    const id = idInput?.value?.trim() || "";
-    if (!name || !id) {
+    if (role === "patient") {
+      const u = { name: "Patient", id: "PATIENT", role };
+      setUser(u);
+      localStorage.setItem("shura_user", JSON.stringify(u));
+      setActivePatient(allPatients[0]);
+      setActivePage(1);
+      setScreen("record");
+      return;
+    }
+    const clinician = ROSTER.find((c) => c.id === clinicianId);
+    const typedId = loginTypedId.trim();
+    if (!clinician || clinician.role !== role) {
+      setLoginErr(true);
+      return;
+    }
+    if (typedId !== clinician.id) {
       setLoginErr(true);
       return;
     }
     setLoginErr(false);
-    const u = { name, id, role };
+    const u = { name: clinician.name, id: clinician.id, role: clinician.role };
     setUser(u);
     localStorage.setItem("shura_user", JSON.stringify(u));
-    if (role === "patient") {
-      setActivePatient(allPatients[0]);
-      setActivePage(1);
-      setScreen("record");
-    } else {
-      setScreen("grid");
-    }
-  }, [role, allPatients]);
+    setScreen("grid");
+  }, [role, clinicianId, loginTypedId, allPatients]);
 
   const openPatient = useCallback((p: PatientData) => {
+    setOpenedCases((prev) => {
+      if (prev.includes(p.id)) return prev;
+      const next = [...prev, p.id];
+      try {
+        localStorage.setItem("shura_opened", JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
     setActivePatient(p);
     setActivePage(1);
     setScreen("record");
@@ -241,7 +319,10 @@ function ShuraApp() {
         logActivity(
           `New intake registered: ${(created as PatientData).name} (${(created as PatientData).id})`,
         );
-        openPatient(created as PatientData);
+        // Open the freshly-created case from the backend record (single source
+        // of truth) so Evidence panel + medications render what the agents read.
+        const fresh = (await fetchPatient((created as PatientData).id)) as PatientData;
+        openPatient(fresh);
       } catch (err) {
         setIntakeError(err instanceof Error ? err.message : "Failed to create patient.");
       } finally {
@@ -264,6 +345,20 @@ function ShuraApp() {
 
   const gotoPage = useCallback((n: number) => setActivePage(n), []);
 
+  // Re-fetch a single patient from the backend and use it as the source of
+  // truth for both the active case and the patient list. This keeps the
+  // Clinical Evidence panel / medications in sync with what the AI agents
+  // actually read (the backend record), instead of a stale in-memory copy.
+  const refetchPatient = useCallback(async (id: string) => {
+    try {
+      const fresh = (await fetchPatient(id)) as PatientData;
+      setActivePatient(fresh);
+      setAllPatients((list) => list.map((p) => (p.id === id ? fresh : p)));
+    } catch {
+      /* keep current state on fetch failure */
+    }
+  }, []);
+
   const handleFieldChange = useCallback(
     (
       section: "screening" | "glycemic" | "vitals" | "renal" | "cardiac" | "ecg" | "chiefComplaint",
@@ -281,8 +376,10 @@ function ShuraApp() {
         setAllPatients((list) => list.map((p) => (p.id === updated.id ? updated : p)));
         return updated;
       });
+      // Persist to backend and re-sync so Evidence panel + agents agree.
+      void refetchPatient(activePatient ? activePatient.id : "");
     },
-    [],
+    [refetchPatient],
   );
 
   const handleAskShura = useCallback(
@@ -405,45 +502,41 @@ function ShuraApp() {
               <div className="space-y-5">
                 <div className="space-y-1.5">
                   <label className="mono text-[10px] uppercase tracking-[1px] text-muted">
-                    Physician Name
+                    Physician
                   </label>
-                  <input
-                    id="loginName"
-                    autoComplete="off"
-                    defaultValue="Dr. Sarah Chen"
-                    className="w-full rounded border border-[--line] bg-[--void] px-4 py-2.5 text-sm text-cream placeholder:text-muted/40 focus:border-[--gold-dim] focus:outline-none"
-                  />
+                  <select
+                    value={clinicianId}
+                    onChange={(e) => {
+                      const c = ROSTER.find((x) => x.id === e.target.value);
+                      setClinicianId(e.target.value);
+                      if (c) setRole(c.role);
+                      if (loginErr) setLoginErr(false);
+                    }}
+                    className="w-full rounded border border-[--line] bg-[--void] px-4 py-2.5 text-sm text-cream focus:border-[--gold-dim] focus:outline-none"
+                  >
+                    <option value="">Select from care team…</option>
+                    {ROSTER.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} — {c.specialty}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div className="space-y-1.5">
                   <label className="mono text-[10px] uppercase tracking-[1px] text-muted">
-                    ID Number
+                    Physician ID
                   </label>
                   <input
                     id="loginId"
                     type="password"
-                    defaultValue="12345"
+                    value={loginTypedId}
+                    onChange={(e) => {
+                      setLoginTypedId(e.target.value);
+                      if (loginErr) setLoginErr(false);
+                    }}
+                    placeholder={`e.g. ${ROSTER.find((c) => c.id === clinicianId)?.id ?? ROSTER[0].id}`}
                     className="w-full rounded border border-[--line] bg-[--void] px-4 py-2.5 text-sm text-cream placeholder:text-muted/40 focus:border-[--gold-dim] focus:outline-none"
                   />
-                </div>
-
-                <div className="pt-2">
-                  <label className="mono mb-2 block text-[10px] uppercase tracking-[1px] text-muted">
-                    Role Override (Demo)
-                  </label>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => selectRole("family")}
-                      className={`flex-1 rounded border p-2 text-xs transition-colors ${role === "family" ? "border-[--gold] bg-[--gold]/10 text-[--gold]" : "border-[--line] text-muted hover:border-[--gold-dim]"}`}
-                    >
-                      Primary Care
-                    </button>
-                    <button
-                      onClick={() => selectRole("specialist")}
-                      className={`flex-1 rounded border p-2 text-xs transition-colors ${role === "specialist" ? "border-[--gold] bg-[--gold]/10 text-[--gold]" : "border-[--line] text-muted hover:border-[--gold-dim]"}`}
-                    >
-                      Specialist
-                    </button>
-                  </div>
                 </div>
 
                 <button onClick={doLogin} className="mt-8 w-full btn-luxe py-3">
@@ -457,6 +550,10 @@ function ShuraApp() {
         {screen === "grid" && user && (
           <ClinicalOverview
             patients={allPatients}
+            referralMap={referralMap}
+            chatMap={chatMap}
+            openedCases={openedCases}
+            role={role}
             user={user}
             loading={patientsLoading}
             error={patientsError}
@@ -484,6 +581,7 @@ function ShuraApp() {
             boardResult={boardResult}
             proveItMode={proveItMode}
             onToggleProveIt={() => setProveItMode(!proveItMode)}
+            onReferralChange={handleReferralChange}
           />
         )}
 
@@ -510,65 +608,6 @@ function ShuraApp() {
         onToggleProveIt={screen === "record" ? () => setProveItMode(!proveItMode) : undefined}
       />
     </>
-  );
-}
-
-function LoginScreen({
-  role,
-  onSelectRole,
-  onLogin,
-  loginErr,
-  onClearErr,
-}: {
-  role: Role;
-  onSelectRole: (r: Role) => void;
-  onLogin: () => void;
-  loginErr: boolean;
-  onClearErr: () => void;
-}) {
-  return (
-    <div className="login-card">
-      <div className="wordmark">
-        <h1>SHURA</h1>
-        <div className="ar">شورى</div>
-      </div>
-      <div className="sub">Sign in to your role</div>
-      <div className="role-tabs">
-        {(["family", "specialist", "patient"] as Role[]).map((r) => (
-          <div
-            key={r}
-            className={`role-tab${role === r ? " active" : ""}`}
-            onClick={() => onSelectRole(r)}
-          >
-            {r === "family" ? "Family Medicine" : r === "specialist" ? "Specialist" : "Patient"}
-          </div>
-        ))}
-      </div>
-      <div className="field-group">
-        <label>Full name</label>
-        <input
-          type="text"
-          id="loginName"
-          placeholder="e.g. Sarah Ahmed Mostafa"
-          onChange={() => loginErr && onClearErr()}
-        />
-      </div>
-      <div className="field-group">
-        <label>National ID number</label>
-        <input
-          type="text"
-          id="loginId"
-          placeholder="14-digit ID"
-          onChange={() => loginErr && onClearErr()}
-        />
-      </div>
-      <div className="signin-btn" onClick={onLogin}>
-        Sign In
-      </div>
-      <div className="login-err" id="loginErr" style={{ display: loginErr ? "block" : "none" }}>
-        Please enter both name and ID number.
-      </div>
-    </div>
   );
 }
 

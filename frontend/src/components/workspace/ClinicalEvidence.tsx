@@ -85,7 +85,10 @@ export function ClinicalEvidence({
         const hasData =
           section.id === "chiefComplaint"
             ? !!patient.chiefComplaint
-            : section.fields.some((f) => (patient as any)[section.id]?.[f.key]);
+            : section.fields.some((f) => {
+                const v = (patient as any)[section.id]?.[f.key];
+                return v && v !== "—";
+              });
 
         return (
           <div

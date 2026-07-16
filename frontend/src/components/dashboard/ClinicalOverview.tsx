@@ -6,16 +6,22 @@ import { IntelligenceOverview } from "./IntelligenceOverview";
 import { AIHealthPanel } from "./AIHealthPanel";
 import { ActivityFeed } from "./ActivityFeed";
 import { AIInsight } from "./AIInsight";
-import { Button } from "../ui/button";
 import { SectionHeader } from "../shared/SectionHeader";
-import { Plus, Users } from "lucide-react";
+import { Button } from "../ui/button";
+import { Badge } from "../ui/badge";
+import { Plus, Users, MessageSquare, Inbox, AlertTriangle } from "lucide-react";
 import { motion } from "framer-motion";
 import { PatientData } from "../../types/patient";
+import { ReferralResponse } from "../../lib/api";
 
 interface ClinicalOverviewProps {
   user: { name: string; id: string; role: string };
   roleLabel: string;
   patients: PatientData[];
+  referralMap: Record<string, ReferralResponse>;
+  chatMap: Record<string, any[]>;
+  openedCases: string[];
+  role: string;
   loading?: boolean;
   error?: boolean;
   onOpenPatient: (p: PatientData) => void;
@@ -24,10 +30,31 @@ interface ClinicalOverviewProps {
   activity?: { time: string; text: string }[];
 }
 
+const REFERRAL_LABEL: Record<string, string> = {
+  not_required: "No Referral",
+  recommended: "Referral Advised",
+  referred: "Referred",
+  declined: "PC Continuing",
+};
+
+function isPriority(
+  p: PatientData,
+  referralMap: Record<string, ReferralResponse>,
+): boolean {
+  if (p.status === "crit" || p.status === "review") return true;
+  const st = referralMap[p.id]?.referral_status;
+  // recommended (pending PC decision) + referred (pending specialist sign-off)
+  return st === "recommended" || st === "referred";
+}
+
 export function ClinicalOverview({
   user,
   roleLabel,
   patients,
+  referralMap,
+  chatMap,
+  openedCases,
+  role,
   loading,
   error,
   onOpenPatient,
@@ -48,6 +75,24 @@ export function ClinicalOverview({
     });
     return stringified.includes('"—"') || stringified.includes('"--"');
   }).length;
+
+  const newCases = patients
+    .filter((p) => p.caseProgress === "Intake" && !openedCases.includes(p.id))
+    .sort(
+      (a, b) =>
+        new Date(b.registeredAt || 0).getTime() - new Date(a.registeredAt || 0).getTime(),
+    );
+  const priorityCases = patients
+    .filter((p) => isPriority(p, referralMap))
+    .sort((a, b) => {
+      const rank = (p: PatientData) => (p.status === "crit" ? 0 : 1);
+      if (rank(a) !== rank(b)) return rank(a) - rank(b);
+      // longest-waiting first (earliest registered)
+      return (
+        new Date(a.registeredAt || 0).getTime() - new Date(b.registeredAt || 0).getTime()
+      );
+    });
+  const chatCases = patients.filter((p) => chatMap[p.id]?.length > 0);
 
   return (
     <div className="h-full w-full overflow-y-auto p-4 md:p-6 lg:p-8 pb-24">
@@ -112,42 +157,187 @@ export function ClinicalOverview({
             </Button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {/* Main Content Column */}
-            <div className="lg:col-span-2 flex flex-col">
-              <PriorityQueue patients={patients} onOpenPatient={onOpenPatient} />
-              <IntelligenceOverview
-                totalPatients={patients.length}
-                criticalCount={criticalCount}
-                reviewCount={reviewCount}
-                patients={patients}
+          <div className="flex flex-col gap-10 mt-8">
+            {/* ---- Section 1: New Cases ---- */}
+            <section>
+              <SectionHeader
+                title="New Cases"
+                subtitle="Not yet opened or reviewed by anyone"
               />
-              <ActivityFeed events={activity} />
-            </div>
-
-            {/* Right Sidebar Column */}
-            <div className="flex flex-col gap-4 md:gap-6">
-              {/* Quick Actions */}
-              <div>
-                <SectionHeader title="Quick Actions" />
-                <div className="grid grid-cols-2 gap-3">
-                  <Button
-                    variant="outline"
-                    className="h-20 flex-col gap-2 bg-void-2 border-line hover:border-gold/30 hover:bg-void-3"
-                    onClick={onAddPatient}
-                  >
-                    <Plus className="w-5 h-5 text-gold" />
-                    <span className="text-xs">New Intake</span>
-                  </Button>
+              {newCases.length === 0 ? (
+                <CardEmpty icon={<Inbox className="w-4 h-4 opacity-50" />} text="No new cases — everything has been opened." />
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {newCases.map((p, i) => (
+                    <CaseRow key={p.id} p={p} i={i} onOpen={onOpenPatient} />
+                  ))}
                 </div>
-              </div>
+              )}
+            </section>
 
-              <AIHealthPanel />
-              <AIInsight reviewCount={reviewCount} />
+            {/* ---- Section 2: Today's Priority ---- */}
+            <section>
+              <SectionHeader
+                title="Today's Priority"
+                subtitle="Critical · conflict · referral-recommended · pending sign-off"
+              />
+              {priorityCases.length === 0 ? (
+                <CardEmpty icon={<AlertTriangle className="w-4 h-4 opacity-50" />} text="No priority cases right now." />
+              ) : (
+                <PriorityQueue
+                  patients={priorityCases}
+                  referralMap={referralMap}
+                  role={role}
+                  onOpenPatient={onOpenPatient}
+                />
+              )}
+            </section>
+
+            {/* ---- Section 3: Doctor-to-Doctor Chat ---- */}
+            <section>
+              <SectionHeader
+                title="Doctor-to-Doctor Chat"
+                subtitle="Peer-to-peer human discussion, tied to specific cases"
+              />
+              {chatCases.length === 0 ? (
+                <CardEmpty
+                  icon={<MessageSquare className="w-4 h-4 opacity-50" />}
+                  text="No active discussions yet. Open a case and start a clinical discussion."
+                />
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {chatCases.map((p, i) => {
+                    const thread = chatMap[p.id];
+                    const last = thread[thread.length - 1];
+                    return (
+                      <motion.div
+                        key={p.id}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.04 }}
+                      >
+                        <button
+                          onClick={() => onOpenPatient(p)}
+                          className="w-full text-left rounded-lg border border-line bg-void-2 hover:border-gold/30 hover:bg-void-3 transition-all p-4 flex flex-col gap-1"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-cream text-sm">{p.name}</span>
+                            <span className="text-[10px] font-mono text-muted">#{p.id}</span>
+                            <span className="text-[10px] font-mono text-muted/60">
+                              {thread.length} message{thread.length > 1 ? "s" : ""}
+                            </span>
+                          </div>
+                          <div className="text-xs text-muted truncate">
+                            <span className="text-gold/80">
+                              {last.sender_name || last.sender_role}:
+                            </span>{" "}
+                            {last.text}
+                          </div>
+                        </button>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2 flex flex-col">
+                <IntelligenceOverview
+                  totalPatients={patients.length}
+                  criticalCount={criticalCount}
+                  reviewCount={reviewCount}
+                  patients={patients}
+                />
+                <ActivityFeed events={activity} />
+              </div>
+              <div className="flex flex-col gap-4 md:gap-6">
+                <div>
+                  <SectionHeader title="Quick Actions" />
+                  <div className="grid grid-cols-2 gap-3">
+                    <Button
+                      variant="outline"
+                      className="h-20 flex-col gap-2 bg-void-2 border-line hover:border-gold/30 hover:bg-void-3"
+                      onClick={onAddPatient}
+                    >
+                      <Plus className="w-5 h-5 text-gold" />
+                      <span className="text-xs">New Intake</span>
+                    </Button>
+                  </div>
+                </div>
+                <AIHealthPanel />
+                <AIInsight reviewCount={reviewCount} />
+              </div>
             </div>
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function CaseRow({
+  p,
+  i,
+  onOpen,
+}: {
+  p: PatientData;
+  i: number;
+  onOpen: (p: PatientData) => void;
+}) {
+  const registered = p.registeredAt
+    ? new Date(p.registeredAt).toLocaleString([], {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "—";
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: i * 0.04 }}
+    >
+      <div className="rounded-lg border border-line bg-void-2 hover:border-gold/30 hover:bg-void-3 transition-all p-4 flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="font-medium text-cream text-sm">{p.name}</span>
+            <span className="text-[10px] font-mono text-muted">#{p.id}</span>
+            <span className="text-[10px] font-mono text-muted/70">
+              {p.age}
+              {p.sex?.[0]?.toUpperCase()}
+            </span>
+            {p.status === "crit" && <Badge variant="destructive">Critical</Badge>}
+            {p.status === "review" && (
+              <Badge variant="outline" className="border-gold text-gold">
+                Review
+              </Badge>
+            )}
+          </div>
+          <div className="text-xs text-muted truncate max-w-md">{p.chiefComplaint || p.dx}</div>
+          <div className="text-[10px] font-mono text-muted/60 mt-0.5">
+            Registered {registered}
+          </div>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onOpen(p)}
+          className="h-8 text-xs font-mono uppercase tracking-widest shrink-0"
+        >
+          Open
+        </Button>
+      </div>
+    </motion.div>
+  );
+}
+
+function CardEmpty({ icon, text }: { icon: React.ReactNode; text: string }) {
+  return (
+    <div className="rounded-lg border border-dashed border-line bg-void-2 p-6 flex items-center gap-3 text-muted text-xs font-mono">
+      {icon}
+      {text}
     </div>
   );
 }

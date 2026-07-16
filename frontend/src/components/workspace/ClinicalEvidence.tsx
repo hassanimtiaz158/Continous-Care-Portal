@@ -50,8 +50,8 @@ const SECTIONS: {
     id: "renal",
     label: "Renal Function",
     fields: [
-      { key: "gfr", label: "eGFR" },
-      { key: "creatinine", label: "Creatinine" },
+      { key: "egfr", label: "eGFR" },
+      { key: "creat", label: "Creatinine" },
     ],
   },
   {
@@ -67,7 +67,7 @@ const SECTIONS: {
     label: "ECG Report",
     fields: [
       { key: "rhythm", label: "Rhythm" },
-      { key: "notes", label: "Interpretation" },
+      { key: "findings", label: "Interpretation" },
     ],
   },
 ];

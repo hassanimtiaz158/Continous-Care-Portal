@@ -90,12 +90,18 @@ export function ContextPanel({
     try {
       const res = await onAskShura(q, agentKey);
       setReply(res?.answer ?? "");
-    } catch {
-      setReply(`Based on your approved care plan: ${patient.edu}`);
+    } catch (err) {
+      // Show an honest failure message — do not echo patient.edu as if it were
+      // an AI-generated answer. The backend's own offline-fallback (returning
+      // patient.edu in the 200 response when no API key is set) is handled by
+      // the happy path above. This catch only fires on a real network/HTTP error.
+      const msg = err instanceof Error ? err.message : "Request failed";
+      setReply(`⚠ AI service unavailable — ${msg}. Please try again or check backend status.`);
     } finally {
       setAsking(false);
     }
   };
+
 
   return (
     <div className="w-full md:w-80 shrink-0 h-auto md:h-full overflow-visible md:overflow-y-auto border-t md:border-t-0 md:border-l border-line bg-void-2 flex flex-col relative z-20">

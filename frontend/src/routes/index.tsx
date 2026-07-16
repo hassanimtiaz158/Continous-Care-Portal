@@ -20,26 +20,36 @@ import { CommandPalette } from "../components/shared/CommandPalette";
 import { Toaster, toast } from "sonner";
 
 /**
- * Fixed care-team roster for login. These are REAL HUMAN physicians who review
- * the AI's output — they must NOT collide with the AI agent names
- * (Rousseau / Osei / Amara), which are separate.
- *
- * TODO (team): paste the final confirmed human roster here. Names + IDs + roles
- * are placeholders for now; login validates the typed ID against `id`.
+ * Fixed demo roster — prevents arbitrary identity entry and eliminates
+ * confusion between human physician names and AI agent names.
+ * These are REAL HUMAN physicians reviewing the AI's output.
+ * AI agents are named Rousseau, Osei, Amara (separate).
  */
-interface Clinician {
-  id: string;
-  name: string;
-  role: Role;
-  specialty: string;
-}
-
-const ROSTER: Clinician[] = [
-  { id: "PC-001", name: "Dr. Nosa Bennett", role: "family", specialty: "Primary Care" },
-  { id: "PC-002", name: "Dr. Amara Okoye", role: "family", specialty: "Primary Care" },
-  { id: "CARD-001", name: "Dr. Lena Fischer", role: "specialist", specialty: "Cardiology" },
-  { id: "NEPH-001", name: "Dr. Kwame Mensah", role: "specialist", specialty: "Nephrology" },
-  { id: "ENDO-001", name: "Dr. Priya Nair", role: "specialist", specialty: "Endocrinology" },
+const PHYSICIAN_ROSTER: { name: string; id: string; role: Role; label: string }[] = [
+  {
+    name: "Dr. Sarah Chen",
+    id: "PHYS-001",
+    role: "family",
+    label: "Dr. Sarah Chen · Primary Care",
+  },
+  {
+    name: "Dr. Amira Osei",
+    id: "PHYS-002",
+    role: "family",
+    label: "Dr. Amira Osei · Primary Care",
+  },
+  {
+    name: "Dr. Marcus Reeves",
+    id: "PHYS-003",
+    role: "specialist",
+    label: "Dr. Marcus Reeves · Specialist",
+  },
+  {
+    name: "Dr. Leila Patel",
+    id: "PHYS-004",
+    role: "specialist",
+    label: "Dr. Leila Patel · Specialist",
+  },
 ];
 
 export const Route = createFileRoute("/")({
@@ -123,8 +133,7 @@ function ShuraApp() {
   const [activePatient, setActivePatient] = useState<PatientData | null>(null);
   const [activePage, setActivePage] = useState(1);
   const [loginErr, setLoginErr] = useState(false);
-  const [clinicianId, setClinicianId] = useState<string>("");
-  const [loginTypedId, setLoginTypedId] = useState<string>("");
+  const [selectedPhysician, setSelectedPhysician] = useState(PHYSICIAN_ROSTER[0]);
   const [openedCases, setOpenedCases] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
     try {
@@ -215,8 +224,7 @@ function ShuraApp() {
 
   const selectRole = useCallback((r: Role) => {
     setRole(r);
-    setClinicianId("");
-    setLoginTypedId("");
+    setSelectedPhysician(PHYSICIAN_ROSTER[0]);
   }, []);
   const enterApp = useCallback(() => setScreen("login"), []);
 
@@ -230,22 +238,17 @@ function ShuraApp() {
       setScreen("record");
       return;
     }
-    const clinician = ROSTER.find((c) => c.id === clinicianId);
-    const typedId = loginTypedId.trim();
-    if (!clinician || clinician.role !== role) {
-      setLoginErr(true);
-      return;
-    }
-    if (typedId !== clinician.id) {
+    const { name, id } = selectedPhysician;
+    if (!name || !id) {
       setLoginErr(true);
       return;
     }
     setLoginErr(false);
-    const u = { name: clinician.name, id: clinician.id, role: clinician.role };
+    const u = { name, id, role: selectedPhysician.role };
     setUser(u);
     localStorage.setItem("shura_user", JSON.stringify(u));
     setScreen("grid");
-  }, [role, clinicianId, loginTypedId, allPatients]);
+  }, [selectedPhysician, role, allPatients]);
 
   const openPatient = useCallback((p: PatientData) => {
     setOpenedCases((prev) => {
@@ -495,51 +498,36 @@ function ShuraApp() {
 
               {loginErr && (
                 <div className="mb-6 rounded border border-[--rose]/30 bg-[--rose]/10 px-4 py-3 text-sm text-[--rose]">
-                  Invalid credentials. Please verify your physician ID.
+                  Please select a physician to continue.
                 </div>
               )}
 
               <div className="space-y-5">
                 <div className="space-y-1.5">
                   <label className="mono text-[10px] uppercase tracking-[1px] text-muted">
-                    Physician
+                    Select Physician
                   </label>
-                  <select
-                    value={clinicianId}
-                    onChange={(e) => {
-                      const c = ROSTER.find((x) => x.id === e.target.value);
-                      setClinicianId(e.target.value);
-                      if (c) setRole(c.role);
-                      if (loginErr) setLoginErr(false);
-                    }}
-                    className="w-full rounded border border-[--line] bg-[--void] px-4 py-2.5 text-sm text-cream focus:border-[--gold-dim] focus:outline-none"
-                  >
-                    <option value="">Select from care team…</option>
-                    {ROSTER.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} — {c.specialty}
-                      </option>
+                  <div className="flex flex-col gap-2">
+                    {PHYSICIAN_ROSTER.map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => setSelectedPhysician(p)}
+                        className={`w-full text-left rounded border px-4 py-3 text-sm transition-colors ${
+                          selectedPhysician.id === p.id
+                            ? "border-[--gold] bg-[--gold]/10 text-[--gold]"
+                            : "border-[--line] bg-[--void] text-cream hover:border-[--gold-dim]"
+                        }`}
+                      >
+                        <div className="font-medium">{p.name}</div>
+                        <div className="text-[10px] font-mono uppercase tracking-widest text-muted mt-0.5">
+                          {p.role === "family" ? "Primary Care" : "Specialist"} · {p.id}
+                        </div>
+                      </button>
                     ))}
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <label className="mono text-[10px] uppercase tracking-[1px] text-muted">
-                    Physician ID
-                  </label>
-                  <input
-                    id="loginId"
-                    type="password"
-                    value={loginTypedId}
-                    onChange={(e) => {
-                      setLoginTypedId(e.target.value);
-                      if (loginErr) setLoginErr(false);
-                    }}
-                    placeholder={`e.g. ${ROSTER.find((c) => c.id === clinicianId)?.id ?? ROSTER[0].id}`}
-                    className="w-full rounded border border-[--line] bg-[--void] px-4 py-2.5 text-sm text-cream placeholder:text-muted/40 focus:border-[--gold-dim] focus:outline-none"
-                  />
+                  </div>
                 </div>
 
-                <button onClick={doLogin} className="mt-8 w-full btn-luxe py-3">
+                <button onClick={doLogin} className="mt-2 w-full btn-luxe py-3">
                   Authenticate
                 </button>
               </div>

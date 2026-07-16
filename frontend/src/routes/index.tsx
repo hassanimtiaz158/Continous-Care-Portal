@@ -24,6 +24,35 @@ export const Route = createFileRoute("/")({
 type Role = "family" | "specialist" | "patient";
 type Status = "crit" | "stable" | "review";
 
+// Fixed demo roster — prevents arbitrary identity entry and eliminates
+// confusion between human physician names and AI agent names.
+const PHYSICIAN_ROSTER: { name: string; id: string; role: Role; label: string }[] = [
+  {
+    name: "Dr. Sarah Chen",
+    id: "PHYS-001",
+    role: "family",
+    label: "Dr. Sarah Chen · Primary Care",
+  },
+  {
+    name: "Dr. Amira Osei",
+    id: "PHYS-002",
+    role: "family",
+    label: "Dr. Amira Osei · Primary Care",
+  },
+  {
+    name: "Dr. Marcus Reeves",
+    id: "PHYS-003",
+    role: "specialist",
+    label: "Dr. Marcus Reeves · Specialist",
+  },
+  {
+    name: "Dr. Leila Patel",
+    id: "PHYS-004",
+    role: "specialist",
+    label: "Dr. Leila Patel · Specialist",
+  },
+];
+
 interface SpecialistFinding {
   text: string;
   metric?: string | null;
@@ -98,6 +127,7 @@ function ShuraApp() {
   const [activePatient, setActivePatient] = useState<PatientData | null>(null);
   const [activePage, setActivePage] = useState(1);
   const [loginErr, setLoginErr] = useState(false);
+  const [selectedPhysician, setSelectedPhysician] = useState(PHYSICIAN_ROSTER[0]);
   const [qdOpen, setQdOpen] = useState(false);
   const [allPatients, setAllPatients] = useState<PatientData[]>([]);
   const [patientsLoading, setPatientsLoading] = useState(true);
@@ -158,26 +188,17 @@ function ShuraApp() {
   const enterApp = useCallback(() => setScreen("login"), []);
 
   const doLogin = useCallback(() => {
-    const nameInput = document.getElementById("loginName") as HTMLInputElement;
-    const idInput = document.getElementById("loginId") as HTMLInputElement;
-    const name = nameInput?.value?.trim() || "";
-    const id = idInput?.value?.trim() || "";
+    const { name, id } = selectedPhysician;
     if (!name || !id) {
       setLoginErr(true);
       return;
     }
     setLoginErr(false);
-    const u = { name, id, role };
+    const u = { name, id, role: selectedPhysician.role };
     setUser(u);
     localStorage.setItem("shura_user", JSON.stringify(u));
-    if (role === "patient") {
-      setActivePatient(allPatients[0]);
-      setActivePage(1);
-      setScreen("record");
-    } else {
-      setScreen("grid");
-    }
-  }, [role, allPatients]);
+    setScreen("grid");
+  }, [selectedPhysician]);
 
   const openPatient = useCallback((p: PatientData) => {
     setActivePatient(p);
@@ -398,55 +419,36 @@ function ShuraApp() {
 
               {loginErr && (
                 <div className="mb-6 rounded border border-[--rose]/30 bg-[--rose]/10 px-4 py-3 text-sm text-[--rose]">
-                  Invalid credentials. Please verify your physician ID.
+                  Please select a physician to continue.
                 </div>
               )}
 
               <div className="space-y-5">
                 <div className="space-y-1.5">
                   <label className="mono text-[10px] uppercase tracking-[1px] text-muted">
-                    Physician Name
+                    Select Physician
                   </label>
-                  <input
-                    id="loginName"
-                    autoComplete="off"
-                    defaultValue="Dr. Sarah Chen"
-                    className="w-full rounded border border-[--line] bg-[--void] px-4 py-2.5 text-sm text-cream placeholder:text-muted/40 focus:border-[--gold-dim] focus:outline-none"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="mono text-[10px] uppercase tracking-[1px] text-muted">
-                    ID Number
-                  </label>
-                  <input
-                    id="loginId"
-                    type="password"
-                    defaultValue="12345"
-                    className="w-full rounded border border-[--line] bg-[--void] px-4 py-2.5 text-sm text-cream placeholder:text-muted/40 focus:border-[--gold-dim] focus:outline-none"
-                  />
-                </div>
-
-                <div className="pt-2">
-                  <label className="mono mb-2 block text-[10px] uppercase tracking-[1px] text-muted">
-                    Role Override (Demo)
-                  </label>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => selectRole("family")}
-                      className={`flex-1 rounded border p-2 text-xs transition-colors ${role === "family" ? "border-[--gold] bg-[--gold]/10 text-[--gold]" : "border-[--line] text-muted hover:border-[--gold-dim]"}`}
-                    >
-                      Primary Care
-                    </button>
-                    <button
-                      onClick={() => selectRole("specialist")}
-                      className={`flex-1 rounded border p-2 text-xs transition-colors ${role === "specialist" ? "border-[--gold] bg-[--gold]/10 text-[--gold]" : "border-[--line] text-muted hover:border-[--gold-dim]"}`}
-                    >
-                      Specialist
-                    </button>
+                  <div className="flex flex-col gap-2">
+                    {PHYSICIAN_ROSTER.map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => setSelectedPhysician(p)}
+                        className={`w-full text-left rounded border px-4 py-3 text-sm transition-colors ${
+                          selectedPhysician.id === p.id
+                            ? "border-[--gold] bg-[--gold]/10 text-[--gold]"
+                            : "border-[--line] bg-[--void] text-cream hover:border-[--gold-dim]"
+                        }`}
+                      >
+                        <div className="font-medium">{p.name}</div>
+                        <div className="text-[10px] font-mono uppercase tracking-widest text-muted mt-0.5">
+                          {p.role === "family" ? "Primary Care" : "Specialist"} · {p.id}
+                        </div>
+                      </button>
+                    ))}
                   </div>
                 </div>
 
-                <button onClick={doLogin} className="mt-8 w-full btn-luxe py-3">
+                <button onClick={doLogin} className="mt-2 w-full btn-luxe py-3">
                   Authenticate
                 </button>
               </div>

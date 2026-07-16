@@ -102,7 +102,6 @@ export function ContextPanel({
     }
   };
 
-
   return (
     <div className="w-full md:w-80 shrink-0 h-auto md:h-full overflow-visible md:overflow-y-auto border-t md:border-t-0 md:border-l border-line bg-void-2 flex flex-col relative z-20">
       <div className="p-6 pb-0 sticky top-0 bg-void-2/90 backdrop-blur-md z-10">

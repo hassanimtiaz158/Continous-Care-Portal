@@ -32,7 +32,7 @@ pip install -e ".[dev]"
 
 # Copy env file and add your key
 copy ..\.env.example .env
-# Edit .env → set ANTHROPIC_API_KEY
+# Edit .env → set DASHSCOPE_API_KEY
 
 # Run server
 uvicorn app.main:app --reload --port 8000
@@ -57,17 +57,18 @@ See `.env.example` at the repo root:
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | Yes | Anthropic API key for Claude |
-| `KIMI_API_KEY` | No | Fallback LLM provider |
+| `DASHSCOPE_API_KEY` | Yes | Alibaba DashScope API key (Qwen models) |
+| `DASHSCOPE_BASE_URL` | No | Defaults to international host; set to the mainland-China host for a CN key |
+| `FRONTEND_URL` | No | Added to the CORS allowlist |
 
 ## Architecture
 
 ```
-React Frontend → FastAPI Backend → Agent Orchestrator → Anthropic / Kimi
-                                                       ↓
-                              Archivist (deterministic) → Specialist Agents → Double Grounding → Board Chair
-                                                       ↓
-                              Human Review Workspace (Physician: Approve / Edit / Reject)
+React Frontend → FastAPI Backend → Agent Orchestrator → DashScope / Qwen
+                                                        ↓
+                               Archivist (deterministic) → Specialist Agents → Double Grounding → Board Chair
+                                                        ↓
+                               Human Review Workspace (Physician: Approve / Edit / Reject)
 ```
 
 ## Key Principles

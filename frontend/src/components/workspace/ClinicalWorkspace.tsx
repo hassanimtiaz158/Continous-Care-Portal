@@ -4,7 +4,7 @@ import { PatientData } from "../../types/patient";
 import { BoardResult, WorkflowStage } from "../../types/board";
 import { ContextPanel } from "./ContextPanel";
 import { WorkspaceCanvas } from "./WorkspaceCanvas";
-import { fetchChat, sendChat } from "@/lib/api";
+import { fetchChat, sendChat, ReferralResponse } from "@/lib/api";
 
 interface ClinicalWorkspaceProps {
   patient: PatientData;
@@ -25,6 +25,7 @@ interface ClinicalWorkspaceProps {
   boardResult: BoardResult | null;
   proveItMode: boolean;
   onToggleProveIt: () => void;
+  onReferralChange?: (id: string, data: ReferralResponse) => void;
 }
 
 export function ClinicalWorkspace({
@@ -42,6 +43,7 @@ export function ClinicalWorkspace({
   boardResult,
   proveItMode,
   onToggleProveIt,
+  onReferralChange,
 }: ClinicalWorkspaceProps) {
   const [hoveredMetric, setHoveredMetric] = useState<string | null>(null);
 
@@ -126,6 +128,7 @@ export function ClinicalWorkspace({
         currentStage={stage}
         onAskShura={onAskShura}
         dataCompleteness={completeness}
+        onReferralChange={onReferralChange}
       />
     </div>
   );

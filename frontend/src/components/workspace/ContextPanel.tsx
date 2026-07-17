@@ -15,8 +15,48 @@ import {
   TestTube,
   MessageSquare,
   Users,
+  Send,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { fetchReferral, setReferral, ReferralResponse } from "@/lib/api";
+import { CardiologyBoard } from "../dashboard/CardiologyBoard";
+import {
+  classifyIntake,
+  IntakeClassification,
+} from "@/lib/cardioApi";
+
+// Working diagnoses in the registry that map to the Cardiology module's
+// guideline keys. A case is only surfaced to the Cardiology Board when its
+// working DX matches one of these.
+const CARDIO_DIAGNOSIS_MAP: Record<string, string> = {
+  "aortic dissection": "AORTIC_DISSECTION",
+  "hypertrophic obstructive cardiomyopathy": "HOCM_SUSPECTED",
+  hocm: "HOCM_SUSPECTED",
+  "myocardial infarction": "ACUTE_MI",
+  "acute mi": "ACUTE_MI",
+  kawasaki: "KAWASAKI_DISEASE",
+  "acute stroke": "ACUTE_STROKE_HTN_DM",
+  "sle pericarditis": "SLE_PERICARDITIS",
+  "sle with pericarditis": "SLE_PERICARDITIS",
+};
+
+/** Resolve a working DX string to a cardiology guideline id, or null. */
+function resolveCardioDiagnosis(dx: string): string | null {
+  const key = (dx || "").toLowerCase().trim();
+  if (!key) return null;
+  for (const [needle, id] of Object.entries(CARDIO_DIAGNOSIS_MAP)) {
+    if (key.includes(needle)) return id;
+  }
+  return null;
+}
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui/dialog";
 
 // Maps the care-team agent_id (from the backend /care-team contract) to the
 // agent param the /ask-shura backend understands.
@@ -42,6 +82,7 @@ interface ContextPanelProps {
   currentStage: WorkflowStage;
   onAskShura: (question: string, agent?: string) => Promise<{ answer: string }>;
   dataCompleteness: number; // 0-100
+  onReferralChange?: (id: string, data: ReferralResponse) => void;
 }
 
 export function ContextPanel({
@@ -52,6 +93,7 @@ export function ContextPanel({
   currentStage,
   onAskShura,
   dataCompleteness,
+  onReferralChange,
 }: ContextPanelProps) {
   const [careTeam, setCareTeam] = useState<CareTeamResponse | null>(null);
   const [careTeamLoading, setCareTeamLoading] = useState(false);
@@ -81,6 +123,102 @@ export function ContextPanel({
   const [askText, setAskText] = useState("");
   const [reply, setReply] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
+
+  // Cardiology module — classify the active case against the cardiology
+  // guideline set and surface the CardiologyBoard when the working DX is a
+  // cardiac diagnosis. Classification is keyed off the real backend
+  // /api/cardiology/intake endpoint (deterministic, auditable).
+  const [cardioIntake, setCardioIntake] = useState<IntakeClassification | null>(null);
+  const [cardioLoading, setCardioLoading] = useState(false);
+  const [cardioError, setCardioError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const diagnosisId = resolveCardioDiagnosis(patient.dx);
+    // Reset whenever the case (or its DX) changes.
+    setCardioIntake(null);
+    setCardioError(null);
+    if (!diagnosisId) return;
+    setCardioLoading(true);
+    classifyIntake({
+      case_id: patient.id,
+      diagnosis_id: diagnosisId,
+      source: patient.status === "crit" ? "emergency" : "internal_clinic",
+    })
+      .then((data) => {
+        if (!cancelled) setCardioIntake(data);
+      })
+      .catch((e) => {
+        if (!cancelled) setCardioError(e?.message || "Failed to load cardiology board");
+      })
+      .finally(() => {
+        if (!cancelled) setCardioLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [patient.id, patient.dx, patient.status]);
+
+  // Referral status — derived server-side from real case data (same pattern
+  // as the Active Care Team reasons). Refetched when the case changes.
+  const [referral, setReferralState] = useState<ReferralResponse | null>(null);
+  const [referring, setReferring] = useState(false);
+  const [referDialogOpen, setReferDialogOpen] = useState(false);
+  const [referTo, setReferTo] = useState("Dr. Jamal Khaled");
+  const [referNote, setReferNote] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchReferral(patient.id)
+      .then((data) => {
+        if (!cancelled) setReferralState(data);
+      })
+      .catch(() => {
+        if (!cancelled) setReferralState(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [patient.id]);
+
+  const applyReferral = (data: ReferralResponse) => {
+    setReferralState(data);
+    onReferralChange?.(patient.id, data);
+  };
+
+  const onReferConfirm = async () => {
+    if (referring) return;
+    setReferring(true);
+    try {
+      const data = await setReferral(patient.id, "referred", {
+        referred_by: user.name,
+        referred_to: referTo.trim() || "Dr. Jamal Khaled",
+        note: referNote.trim() || undefined,
+      });
+      applyReferral(data);
+      setReferDialogOpen(false);
+      setReferNote("");
+    } catch {
+      /* ignore */
+    } finally {
+      setReferring(false);
+    }
+  };
+
+  const onContinuePC = async () => {
+    if (referring) return;
+    setReferring(true);
+    try {
+      const data = await setReferral(patient.id, "declined", {
+        referred_by: user.name,
+      });
+      applyReferral(data);
+    } catch {
+      /* ignore */
+    } finally {
+      setReferring(false);
+    }
+  };
 
   const ask = async (agentKey?: string) => {
     const q = askText.trim();
@@ -166,6 +304,48 @@ export function ContextPanel({
               </span>
               <span className="text-sm text-cream">{patient.dx}</span>
             </div>
+
+            {/* Referral recommendation — derived server-side from real case data */}
+            {referral && referral.referral_status === "recommended" && (
+              <>
+                <div className="h-[1px] bg-line w-full opacity-50" />
+                <div className="rounded-md border border-gold/40 bg-gold/5 p-2.5 flex flex-col gap-1">
+                  <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-widest text-gold">
+                    <Send className="w-3 h-3" /> Specialist referral recommended
+                  </div>
+                  <p className="text-[11px] text-cream/90 leading-snug">
+                    {referral.referral_reason}
+                  </p>
+                </div>
+              </>
+            )}
+            {referral && referral.referral_status === "referred" && (
+              <>
+                <div className="h-[1px] bg-line w-full opacity-50" />
+                <div className="rounded-md border border-teal/40 bg-teal/5 p-2.5 flex flex-col gap-1">
+                  <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-widest text-teal">
+                    <Send className="w-3 h-3" /> Referred to Specialist
+                  </div>
+                  <p className="text-[11px] text-cream/90 leading-snug">
+                    {referral.referred_by || "Primary Care"} → {referral.referred_to || "Specialist"}
+                    {referral.referred_at ? ` · ${new Date(referral.referred_at).toLocaleString()}` : ""}
+                  </p>
+                </div>
+              </>
+            )}
+            {referral && referral.referral_status === "declined" && (
+              <>
+                <div className="h-[1px] bg-line w-full opacity-50" />
+                <div className="rounded-md border border-line bg-void-3 p-2.5 flex flex-col gap-1">
+                  <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-widest text-muted">
+                    <Send className="w-3 h-3" /> Primary Care (referral declined)
+                  </div>
+                  <p className="text-[11px] text-cream/70 leading-snug">
+                    {referral.referral_reason}
+                  </p>
+                </div>
+              </>
+            )}
             {patient.allergies && patient.allergies.length > 0 && (
               <>
                 <div className="h-[1px] bg-line w-full opacity-50" />
@@ -243,6 +423,28 @@ export function ContextPanel({
             </div>
           </div>
 
+          {/* Cardiology Board — only rendered for cardiac working diagnoses.
+              Driven entirely by the auditable /api/cardiology endpoints. */}
+          {cardioLoading && (
+            <div className="p-5 rounded-xl border border-line bg-void flex flex-col gap-2">
+              <span className="text-[10px] font-mono uppercase tracking-widest text-gold">
+                Cardiology Board
+              </span>
+              <p className="text-[11px] text-muted leading-snug">Loading cardiology pathway…</p>
+            </div>
+          )}
+          {cardioError && (
+            <div className="p-5 rounded-xl border border-rose/40 bg-rose/5 flex flex-col gap-1">
+              <span className="text-[10px] font-mono uppercase tracking-widest text-rose">
+                Cardiology Board
+              </span>
+              <p className="text-[11px] text-cream/80 leading-snug">{cardioError}</p>
+            </div>
+          )}
+          {cardioIntake && (
+            <CardiologyBoard intake={cardioIntake} physicianName={user.name} />
+          )}
+
           <div className="flex gap-2">
             <Button
               variant="outline"
@@ -259,6 +461,107 @@ export function ContextPanel({
               <MessageSquare className="w-3 h-3" /> Ping
             </Button>
           </div>
+
+          {/* Referral actions — only meaningful when a referral is recommended
+              or already acted on. Physician judgment stays final. */}
+          {referral && referral.referral_status !== "not_required" && (
+            <div className="flex flex-col gap-2">
+              <div className="flex gap-2">
+                {referral.referral_status !== "referred" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={referring}
+                    onClick={() => setReferDialogOpen(true)}
+                    className="flex-1 border-gold/40 text-gold hover:bg-gold/5 h-8 text-[10px] uppercase font-mono tracking-widest gap-1"
+                  >
+                    <Send className="w-3 h-3" /> Refer to Specialist
+                  </Button>
+                )}
+                {referral.referral_status !== "declined" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={referring}
+                    onClick={onContinuePC}
+                    className="flex-1 border-line text-muted hover:text-cream hover:bg-void-3 h-8 text-[10px] uppercase font-mono tracking-widest gap-1"
+                  >
+                    Continue as Primary Care
+                  </Button>
+                )}
+              </div>
+
+              {referral.referral_status === "referred" && (
+                <p className="text-[10px] font-mono uppercase tracking-widest text-gold/80 leading-snug">
+                  Referred to {referral.referred_to || "specialist"}
+                  {referral.referred_by ? ` by ${referral.referred_by}` : ""}
+                  {referral.note ? ` — ${referral.note}` : ""}
+                </p>
+              )}
+              {referral.referral_status === "declined" && (
+                <p className="text-[10px] font-mono uppercase tracking-widest text-muted leading-snug">
+                  Primary Care continuing (referral declined)
+                </p>
+              )}
+
+              <Dialog open={referDialogOpen} onOpenChange={setReferDialogOpen}>
+                <DialogContent className="bg-void-2 border-line">
+                  <DialogHeader>
+                    <DialogTitle className="text-cream font-mono uppercase tracking-widest text-sm">
+                      Refer to Specialist
+                    </DialogTitle>
+                  </DialogHeader>
+                  <div className="flex flex-col gap-3">
+                    <p className="text-[11px] text-muted leading-snug">
+                      {referral.referral_reason}
+                    </p>
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[10px] font-mono uppercase tracking-widest text-muted">
+                        Refer to
+                      </span>
+                      <Input
+                        value={referTo}
+                        onChange={(e) => setReferTo(e.target.value)}
+                        className="bg-void border-line text-cream text-sm"
+                        placeholder="Specialist name"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[10px] font-mono uppercase tracking-widest text-muted">
+                        Note (optional)
+                      </span>
+                      <Input
+                        value={referNote}
+                        onChange={(e) => setReferNote(e.target.value)}
+                        className="bg-void border-line text-cream text-sm"
+                        placeholder="Reason / context for referral"
+                      />
+                    </div>
+                  </div>
+                  <DialogFooter className="gap-2">
+                    <DialogClose asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-line text-muted hover:text-cream"
+                      >
+                        Cancel
+                      </Button>
+                    </DialogClose>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={referring}
+                      onClick={onReferConfirm}
+                      className="border-gold/40 text-gold hover:bg-gold/5"
+                    >
+                      Confirm Referral
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </div>
+          )}
 
           <CaseProgressTracker currentStage={currentStage} />
 

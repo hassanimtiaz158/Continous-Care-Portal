@@ -30,4 +30,6 @@ export interface PatientData {
   };
   plan: string;
   edu: string;
+  caseProgress?: string; // "Intake" | "Physician Review" | "Monitoring"
+  registeredAt?: string; // ISO timestamp
 }

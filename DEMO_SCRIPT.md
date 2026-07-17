@@ -100,10 +100,10 @@ Open the PDF to show the sections.
 **Say:**
 > "Three security guarantees:
 > 1. **Zero secrets in the browser** — grep the built JS bundle: no API keys, no system prompts.
-> 2. **All LLM calls backend-only** — the frontend calls POST /api/board/run, the backend handles Anthropic.
+> 2. **All LLM calls backend-only** — the frontend calls POST /api/board/run, the backend handles the LLM (Alibaba DashScope / Qwen).
 > 3. **Double Grounding** — every numeric claim is verified; hallucinated values are withheld and logged."
 
-> "129 automated tests pass, including 12 adversarial tests that simulate LLM hallucination patterns — fabricated HbA1c, fake eGFR, invented BP values — all blocked."
+> "201 automated tests pass, including adversarial tests that simulate LLM hallucination patterns — fabricated HbA1c, fake eGFR, invented BP values — all blocked."
 
 ---
 
@@ -129,5 +129,65 @@ Open the PDF to show the sections.
 ## Troubleshooting
 
 - **Port 8000 busy:** Kill existing process or use `--port 8001` and update `vite.config.js` proxy.
-- **No ANTHROPIC_API_KEY:** The board returns 503. Add key to `.env` file.
-- **Slow first run:** Anthropic cold start ~5-8s. Subsequent runs are faster.
+- **No DASHSCOPE_API_KEY:** The board returns 503. Add the international-host key to `backend/.env` (see below).
+- **Slow first run:** Qwen cold start ~5-8s. Subsequent runs are faster.
+
+---
+
+## 6. Cardiology Module — 30-Second Walkthrough
+
+> Use this when a judge asks to see the department-by-department rebuild, or
+> wants to see a different patient flow than the chronic-disease board.
+
+**Open patient `EG-7701`** (R.T., 63M — suspected aortic dissection). The
+right-hand panel auto-renders the **Cardiology Board** because the working DX
+matches a cardiology guideline.
+
+**Say (point at the 4-ring astrolabe):**
+> "Every cardiology case is classified into one or more of four intake
+> pathways — A (ER admission), B (referral-in), C (concurrent shared care),
+> D (outbound consult). This patient is A + C + D simultaneously: came in via
+> Emergency, is co-managed with Cardiothoracic Surgery, and needs a consult
+> from Radiology. The astrolabe lights one ring per active pathway."
+
+**Walk the orders:**
+1. **Lab Orders** — "The panel is looked up from a guideline table, never
+   invented by an LLM. Post a troponin result of `0.09` → it flags
+   **critical** automatically. Click **Acknowledge** to sign off — that's the
+   human-in-the-loop control closing the loop."
+2. **OCR draft** — "A result scanned from paper is created as **DRAFT** and
+   can't enter the record until a clinician clicks **Confirm Result**."
+3. **Imaging Orders** — "Advance CT Angiography through
+   ordered → collected → resulting → resulted. The state machine is
+   forward-only — you can't silently roll a resulted order backwards."
+4. **Ownership Chain** — "For concurrent cases, the state machine tracks who
+   owns the case with an append-only history. Transfer to Cardiothoracic
+   Surgery and you see the full chain of custody with the confirming
+   physician attributed."
+
+**Open `EG-7812`** (L.B., 4M — suspected Kawasaki) to show a *different*
+pathway mix — **D only** (outbound consult to Radiology for coronary echo),
+no ER admission, no concurrent ownership. Proves the classifier isn't
+hardcoded to dissection.
+
+**Key Cardiology talking points:**
+- Intake classification, order generation, and the ownership state machine are
+  **100% deterministic** — no LLM, fully auditable.
+- Critical-value thresholds are explicit numeric rules, evaluated by a
+  restricted safe comparator (never `eval`).
+- In-memory during the demo: cardio state (classifications, orders, ownership)
+  resets if the backend restarts — **restart the server fresh before
+  presenting**.
+
+---
+
+## Cardiology Test Counts (for reference)
+
+| Suite | Tests |
+|-------|-------|
+| `test_cardio_pathway.py` | 11 |
+| `test_cardio_orders.py` | 13 |
+| `test_cardio_coordination.py` | 6 |
+| `test_cardio_routes.py` | 4 |
+| **Cardiology total** | **34** |
+| Full backend suite | 201 |

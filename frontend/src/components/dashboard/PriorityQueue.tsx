@@ -8,16 +8,32 @@ import { SectionHeader } from "../shared/SectionHeader";
 import { motion } from "framer-motion";
 
 import { PatientData } from "../../types/patient";
+import { ReferralResponse } from "../../lib/api";
+
+const REFERRAL_LABEL: Record<string, string> = {
+  not_required: "No Referral",
+  recommended: "Referral Advised",
+  referred: "Referred",
+  declined: "PC Continuing",
+};
 
 export function PriorityQueue({
   patients,
+  referralMap,
+  role,
   onOpenPatient,
 }: {
   patients: PatientData[];
+  referralMap?: Record<string, ReferralResponse>;
+  role?: string;
   onOpenPatient: (p: PatientData) => void;
 }) {
+  // Specialists only care about cases already referred out; everyone else sees
+  // the critical/review queue. The list is already role-filtered upstream.
   const criticalPatients = patients
-    .filter((p) => p.status === "crit" || p.status === "review")
+    .filter((p) =>
+      role === "specialist" ? true : p.status === "crit" || p.status === "review",
+    )
     .slice(0, 5);
 
   if (criticalPatients.length === 0) {
@@ -58,6 +74,24 @@ export function PriorityQueue({
                       {patient.status === "review" && (
                         <Badge variant="outline" className="border-gold text-gold">
                           Review
+                        </Badge>
+                      )}
+                      {referralMap?.[patient.id]?.referral_status && (
+                        <Badge
+                          variant="outline"
+                          className={
+                            referralMap[patient.id].referral_status === "referred"
+                              ? "border-teal text-teal"
+                              : referralMap[patient.id].referral_status === "recommended"
+                                ? "border-gold text-gold"
+                                : "border-line text-muted"
+                          }
+                        >
+                          {REFERRAL_LABEL[referralMap[patient.id].referral_status]}
+                          {referralMap[patient.id].referral_status === "referred" &&
+                          referralMap[patient.id].referred_to
+                            ? ` → ${referralMap[patient.id].referred_to}`
+                            : ""}
                         </Badge>
                       )}
                     </div>

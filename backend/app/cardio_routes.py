@@ -13,6 +13,17 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.audit import (
+    delete_cardio_case,
+    load_cardio_classification,
+    load_cardio_imaging_orders,
+    load_cardio_lab_orders,
+    load_cardio_ownership,
+    save_cardio_classification,
+    save_cardio_imaging_orders,
+    save_cardio_lab_orders,
+    save_cardio_ownership,
+)
 from app.cardio_coordination import (
     Department,
     OwnershipState,
@@ -35,12 +46,9 @@ from app.cardio_pathway import IntakeClassification, IntakeRequest, classify_pat
 
 cardio_router = APIRouter(prefix="/api/cardiology", tags=["cardiology"])
 
-# In-memory stores for the hackathon demo — same pattern as _REFERRALS in
-# main.py. A real deployment would back these with the audit.db tables.
-_CLASSIFICATIONS: dict[str, IntakeClassification] = {}
-_LAB_ORDERS: dict[str, list[LabOrder]] = {}
-_IMAGING_ORDERS: dict[str, list[ImagingOrder]] = {}
-_OWNERSHIP: dict[str, OwnershipState] = {}
+# State is persisted to audit.db (via app.audit) rather than held in memory,
+# so live demo cases survive a backend restart. Each case_id keys a small
+# JSON blob per store.
 
 
 # ---------------------------------------------------------------------------
@@ -51,30 +59,29 @@ _OWNERSHIP: dict[str, OwnershipState] = {}
 @cardio_router.post("/intake", response_model=IntakeClassification)
 def classify_intake(req: IntakeRequest):
     result = classify_pathway(req)
-    _CLASSIFICATIONS[req.case_id.upper()] = result
 
-    # Auto-open the ownership state machine and auto-generate the order
-    # sets, so the frontend doesn't need three separate calls right after
-    # intake.
-    _OWNERSHIP[req.case_id.upper()] = start_ownership(
+    ownership = start_ownership(
         req.case_id,
         "emergency" if req.source == "emergency" else "cardiology",
     )
-    _LAB_ORDERS[req.case_id.upper()] = build_lab_orders(req.case_id, req.diagnosis_id)
-    _IMAGING_ORDERS[req.case_id.upper()] = build_imaging_orders(req.case_id, req.diagnosis_id)
+    labs = build_lab_orders(req.case_id, req.diagnosis_id)
+    imaging = build_imaging_orders(req.case_id, req.diagnosis_id)
     for dept in result.consulting_departments:
-        _OWNERSHIP[req.case_id.upper()] = add_consulting_department(
-            _OWNERSHIP[req.case_id.upper()], dept  # type: ignore[arg-type]
-        )
+        ownership = add_consulting_department(ownership, dept)
+
+    save_cardio_classification(req.case_id, result.model_dump_json())
+    save_cardio_ownership(req.case_id, ownership.model_dump_json())
+    save_cardio_lab_orders(req.case_id, LabOrderList(items=labs).model_dump_json())
+    save_cardio_imaging_orders(req.case_id, ImagingOrderList(items=imaging).model_dump_json())
     return result
 
 
 @cardio_router.get("/cases/{case_id}/intake", response_model=IntakeClassification)
 def get_intake(case_id: str):
-    result = _CLASSIFICATIONS.get(case_id.upper())
-    if result is None:
+    payload = load_cardio_classification(case_id)
+    if payload is None:
         raise HTTPException(status_code=404, detail=f"No intake classification for {case_id}")
-    return result
+    return IntakeClassification.model_validate_json(payload)
 
 
 # ---------------------------------------------------------------------------
@@ -82,12 +89,39 @@ def get_intake(case_id: str):
 # ---------------------------------------------------------------------------
 
 
+class LabOrderList(BaseModel):
+    items: list[LabOrder]
+
+
+class ImagingOrderList(BaseModel):
+    items: list[ImagingOrder]
+
+
+def _load_labs(case_id: str) -> list[LabOrder]:
+    payload = load_cardio_lab_orders(case_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"No lab orders for {case_id}")
+    return LabOrderList.model_validate_json(payload).items
+
+
+def _save_labs(case_id: str, orders: list[LabOrder]) -> None:
+    save_cardio_lab_orders(case_id, LabOrderList(items=orders).model_dump_json())
+
+
+def _load_imaging(case_id: str) -> list[ImagingOrder]:
+    payload = load_cardio_imaging_orders(case_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"No imaging orders for {case_id}")
+    return ImagingOrderList.model_validate_json(payload).items
+
+
+def _save_imaging(case_id: str, orders: list[ImagingOrder]) -> None:
+    save_cardio_imaging_orders(case_id, ImagingOrderList(items=orders).model_dump_json())
+
+
 @cardio_router.get("/cases/{case_id}/labs", response_model=list[LabOrder])
 def get_lab_orders(case_id: str):
-    orders = _LAB_ORDERS.get(case_id.upper())
-    if orders is None:
-        raise HTTPException(status_code=404, detail=f"No lab orders for {case_id}")
-    return orders
+    return _load_labs(case_id)
 
 
 class LabResultRequest(BaseModel):
@@ -98,22 +132,19 @@ class LabResultRequest(BaseModel):
 
 @cardio_router.post("/cases/{case_id}/labs/result", response_model=LabOrder)
 def post_lab_result(case_id: str, req: LabResultRequest):
-    orders = _LAB_ORDERS.get(case_id.upper())
-    if orders is None:
-        raise HTTPException(status_code=404, detail=f"No lab orders for {case_id}")
+    orders = _load_labs(case_id)
     idx = next((i for i, o in enumerate(orders) if o.id == req.order_id), None)
     if idx is None:
         raise HTTPException(status_code=404, detail=f"Order {req.order_id} not found")
     updated = record_lab_result(orders[idx], req.value, req.source)
     orders[idx] = updated
+    _save_labs(case_id, orders)
     return updated
 
 
 @cardio_router.post("/cases/{case_id}/labs/{order_id}/confirm", response_model=LabOrder)
 def confirm_lab_draft(case_id: str, order_id: str):
-    orders = _LAB_ORDERS.get(case_id.upper())
-    if orders is None:
-        raise HTTPException(status_code=404, detail=f"No lab orders for {case_id}")
+    orders = _load_labs(case_id)
     idx = next((i for i, o in enumerate(orders) if o.id == order_id), None)
     if idx is None:
         raise HTTPException(status_code=404, detail=f"Order {order_id} not found")
@@ -121,6 +152,7 @@ def confirm_lab_draft(case_id: str, order_id: str):
         raise HTTPException(status_code=400, detail="Order is not a draft")
     updated = confirm_draft_result(orders[idx])
     orders[idx] = updated
+    _save_labs(case_id, orders)
     return updated
 
 
@@ -136,9 +168,7 @@ def acknowledge_lab_critical(case_id: str, order_id: str, req: AcknowledgeCritic
     'critical' flag alone is only a visual cue, this is what closes the
     loop with an attributed acknowledgement.
     """
-    orders = _LAB_ORDERS.get(case_id.upper())
-    if orders is None:
-        raise HTTPException(status_code=404, detail=f"No lab orders for {case_id}")
+    orders = _load_labs(case_id)
     idx = next((i for i, o in enumerate(orders) if o.id == order_id), None)
     if idx is None:
         raise HTTPException(status_code=404, detail=f"Order {order_id} not found")
@@ -147,6 +177,7 @@ def acknowledge_lab_critical(case_id: str, order_id: str, req: AcknowledgeCritic
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     orders[idx] = updated
+    _save_labs(case_id, orders)
     return updated
 
 
@@ -157,10 +188,7 @@ def acknowledge_lab_critical(case_id: str, order_id: str, req: AcknowledgeCritic
 
 @cardio_router.get("/cases/{case_id}/imaging", response_model=list[ImagingOrder])
 def get_imaging_orders(case_id: str):
-    orders = _IMAGING_ORDERS.get(case_id.upper())
-    if orders is None:
-        raise HTTPException(status_code=404, detail=f"No imaging orders for {case_id}")
-    return orders
+    return _load_imaging(case_id)
 
 
 class ImagingStatusRequest(BaseModel):
@@ -171,9 +199,7 @@ class ImagingStatusRequest(BaseModel):
 
 @cardio_router.post("/cases/{case_id}/imaging/status", response_model=ImagingOrder)
 def update_imaging_status(case_id: str, req: ImagingStatusRequest):
-    orders = _IMAGING_ORDERS.get(case_id.upper())
-    if orders is None:
-        raise HTTPException(status_code=404, detail=f"No imaging orders for {case_id}")
+    orders = _load_imaging(case_id)
     idx = next((i for i, o in enumerate(orders) if o.id == req.order_id), None)
     if idx is None:
         raise HTTPException(status_code=404, detail=f"Order {req.order_id} not found")
@@ -186,6 +212,7 @@ def update_imaging_status(case_id: str, req: ImagingStatusRequest):
         }
     )
     orders[idx] = updated
+    _save_imaging(case_id, orders)
     return updated
 
 
@@ -196,10 +223,10 @@ def update_imaging_status(case_id: str, req: ImagingStatusRequest):
 
 @cardio_router.get("/cases/{case_id}/ownership", response_model=OwnershipState)
 def get_ownership(case_id: str):
-    state = _OWNERSHIP.get(case_id.upper())
-    if state is None:
+    payload = load_cardio_ownership(case_id)
+    if payload is None:
         raise HTTPException(status_code=404, detail=f"No ownership record for {case_id}")
-    return state
+    return OwnershipState.model_validate_json(payload)
 
 
 class TransferOwnershipRequest(BaseModel):
@@ -210,12 +237,20 @@ class TransferOwnershipRequest(BaseModel):
 
 @cardio_router.post("/cases/{case_id}/ownership/transfer", response_model=OwnershipState)
 def transfer_case_ownership(case_id: str, req: TransferOwnershipRequest):
-    state = _OWNERSHIP.get(case_id.upper())
-    if state is None:
+    payload = load_cardio_ownership(case_id)
+    if payload is None:
         raise HTTPException(status_code=404, detail=f"No ownership record for {case_id}")
+    state = OwnershipState.model_validate_json(payload)
     try:
         updated = transfer_ownership(state, req.to_department, req.reason, req.confirmed_by)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    _OWNERSHIP[case_id.upper()] = updated
+    save_cardio_ownership(case_id, updated.model_dump_json())
     return updated
+
+
+@cardio_router.delete("/cases/{case_id}")
+def delete_case(case_id: str):
+    """Remove all persisted cardio state for a case."""
+    delete_cardio_case(case_id)
+    return {"deleted": case_id}

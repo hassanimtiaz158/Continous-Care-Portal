@@ -385,7 +385,7 @@ export function CardiologyBoard({ intake, physicianName }: CardiologyBoardProps)
       </div>
 
       <p className="mb-4 text-[10px] text-muted">
-        Session state — orders &amp; ownership reset if the backend restarts.
+        State persists in audit.db — survives a backend restart.
       </p>
 
       <div className="mb-5 flex items-start gap-5">

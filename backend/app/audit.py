@@ -221,3 +221,112 @@ def get_audit_trail(session_id: str) -> dict[str, Any] | None:
         "physician_name": row["physician_name"],
         "decided_at": row["decided_at"],
     }
+
+
+# ---------------------------------------------------------------------------
+# Cardiology module persistence — TDD §4.
+#
+# The Cardiology module's intake classifications, lab/imaging orders and
+# ownership state machine are persisted here (same SQLite file as the audit
+# trail) instead of the previous in-memory dicts, so a backend restart no
+# longer wipes a live demo case. Each row stores the serialised Pydantic
+# domain object keyed by case_id (1:1 for classifications/ownership, 1:N for
+# orders, which we store as a single JSON list per case).
+# ---------------------------------------------------------------------------
+
+
+def _init_cardio_schema(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS cardio_classifications (
+            case_id      TEXT PRIMARY KEY,
+            payload      TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS cardio_ownership (
+            case_id      TEXT PRIMARY KEY,
+            payload      TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS cardio_lab_orders (
+            case_id      TEXT PRIMARY KEY,
+            payload      TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS cardio_imaging_orders (
+            case_id      TEXT PRIMARY KEY,
+            payload      TEXT NOT NULL
+        );
+        """
+    )
+    conn.commit()
+
+
+def _cardio_put(table: str, case_id: str, payload: str) -> None:
+    conn = _get_conn()
+    _init_cardio_schema(conn)
+    conn.execute(
+        f"INSERT INTO {table} (case_id, payload) VALUES (?, ?) "
+        f"ON CONFLICT(case_id) DO UPDATE SET payload = excluded.payload",
+        (case_id.upper(), payload),
+    )
+    conn.commit()
+
+
+def _cardio_get(table: str, case_id: str) -> str | None:
+    conn = _get_conn()
+    _init_cardio_schema(conn)
+    row = conn.execute(
+        f"SELECT payload FROM {table} WHERE case_id = ?", (case_id.upper(),)
+    ).fetchone()
+    return row["payload"] if row is not None else None
+
+
+def _cardio_delete(table: str, case_id: str) -> None:
+    conn = _get_conn()
+    _init_cardio_schema(conn)
+    conn.execute(f"DELETE FROM {table} WHERE case_id = ?", (case_id.upper(),))
+    conn.commit()
+
+
+# Public helpers used by cardio_routes.py --------------------------------
+
+
+def save_cardio_classification(case_id: str, payload: str) -> None:
+    _cardio_put("cardio_classifications", case_id, payload)
+
+
+def load_cardio_classification(case_id: str) -> str | None:
+    return _cardio_get("cardio_classifications", case_id)
+
+
+def save_cardio_ownership(case_id: str, payload: str) -> None:
+    _cardio_put("cardio_ownership", case_id, payload)
+
+
+def load_cardio_ownership(case_id: str) -> str | None:
+    return _cardio_get("cardio_ownership", case_id)
+
+
+def save_cardio_lab_orders(case_id: str, payload: str) -> None:
+    _cardio_put("cardio_lab_orders", case_id, payload)
+
+
+def load_cardio_lab_orders(case_id: str) -> str | None:
+    return _cardio_get("cardio_lab_orders", case_id)
+
+
+def save_cardio_imaging_orders(case_id: str, payload: str) -> None:
+    _cardio_put("cardio_imaging_orders", case_id, payload)
+
+
+def load_cardio_imaging_orders(case_id: str) -> str | None:
+    return _cardio_get("cardio_imaging_orders", case_id)
+
+
+def delete_cardio_case(case_id: str) -> None:
+    """Remove all persisted cardio state for a case (used by tests / reset)."""
+    for table in (
+        "cardio_classifications",
+        "cardio_ownership",
+        "cardio_lab_orders",
+        "cardio_imaging_orders",
+    ):
+        _cardio_delete(table, case_id)

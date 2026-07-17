@@ -196,7 +196,12 @@ export async function fetchCareTeam(caseId: string): Promise<CareTeamResponse> {
 }
 
 // ---- Health ----
-export async function healthCheck() {
+export interface HealthResponse {
+  status: string;
+  qwen_key_set: boolean;
+}
+
+export async function healthCheck(): Promise<HealthResponse> {
   const res = await fetch(`${API_BASE}/api/health`);
   if (!res.ok) throw new Error("Backend unavailable");
   return res.json();

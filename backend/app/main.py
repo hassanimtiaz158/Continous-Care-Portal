@@ -214,6 +214,28 @@ _SHURA_PATIENTS["EG-7701"] = _sp(
     case_progress="Physician Review", registered_at="2026-07-17T09:05:00"
 )
 
+# Second cardiac demo case — Kawasaki disease (pathway D: outbound consult to
+# radiology for coronary-artery echo). Shows a DIFFERENT pathway mix than the
+# dissection case (no ER admission, no concurrent ownership), proving the
+# module isn't hardcoded to A+C+D. Working DX matches CARDIO_DIAGNOSIS_MAP
+# -> KAWASAKI_DISEASE.
+_SHURA_PATIENTS["EG-7812"] = _sp(
+    id="EG-7812", name="L.B.", age=4, sex="Male", dx="Kawasaki disease (suspected)", status="review",
+    medications=[],
+    screening={"rbg":"95","hba1c":"—","bp":"102/64","date":"17/07/2026"},
+    glycemic={"hba1c":"—","fbs":"—","rbs":"—"},
+    vitals={"bp":"102/64","hr":"128","weight":"17","temp":"39.4"},
+    renal={"egfr":"—","creat":"—","acr":"—","k":"—"},
+    cardiac={"sounds":"Normal S1/S2","grade":"—","notes":"No murmur; concerns re: coronary involvement."},
+    ecg={"rhythm":"Sinus tachycardia","rate":"128","findings":"Non-specific."},
+    gpNote="5-day fever, bilateral conjunctivitis, strawberry tongue, extremity changes. Meets Kawasaki criteria — needs urgent echocardiogram to exclude coronary aneurysm.",
+    chiefComplaint="High fever for 5 days with red eyes, rash, and swollen hands/feet.",
+    agents={"endo":{"rec":"No endocrine indication.","conf":97},"neph":{"rec":"No renal concern.","conf":98},"card":{"rec":"Urgent echocardiogram for coronary arteries per Kawasaki protocol.","conf":94,"warn":True}},
+    plan="IVIG + aspirin; urgent paediatric echocardiogram to exclude coronary aneurysm.",
+    edu="Your child needs a special heart scan today and a medicine to reduce inflammation. The team will explain each step.",
+    case_progress="Physician Review", registered_at="2026-07-17T09:20:00"
+)
+
 
 # Also seed the original Patient model for board/run compatibility
 CCP014 = Patient(

@@ -384,6 +384,10 @@ export function CardiologyBoard({ intake, physicianName }: CardiologyBoardProps)
         </Badge>
       </div>
 
+      <p className="mb-4 text-[10px] text-muted">
+        Session state — orders &amp; ownership reset if the backend restarts.
+      </p>
+
       <div className="mb-5 flex items-start gap-5">
         <PathwayAstrolabe pathways={intake.pathways} />
         <div className="flex flex-1 flex-col gap-1.5 pt-1">

@@ -19,6 +19,36 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fetchReferral, setReferral, ReferralResponse } from "@/lib/api";
+import { CardiologyBoard } from "../dashboard/CardiologyBoard";
+import {
+  classifyIntake,
+  IntakeClassification,
+} from "@/lib/cardioApi";
+
+// Working diagnoses in the registry that map to the Cardiology module's
+// guideline keys. A case is only surfaced to the Cardiology Board when its
+// working DX matches one of these.
+const CARDIO_DIAGNOSIS_MAP: Record<string, string> = {
+  "aortic dissection": "AORTIC_DISSECTION",
+  "hypertrophic obstructive cardiomyopathy": "HOCM_SUSPECTED",
+  hocm: "HOCM_SUSPECTED",
+  "myocardial infarction": "ACUTE_MI",
+  "acute mi": "ACUTE_MI",
+  kawasaki: "KAWASAKI_DISEASE",
+  "acute stroke": "ACUTE_STROKE_HTN_DM",
+  "sle pericarditis": "SLE_PERICARDITIS",
+  "sle with pericarditis": "SLE_PERICARDITIS",
+};
+
+/** Resolve a working DX string to a cardiology guideline id, or null. */
+function resolveCardioDiagnosis(dx: string): string | null {
+  const key = (dx || "").toLowerCase().trim();
+  if (!key) return null;
+  for (const [needle, id] of Object.entries(CARDIO_DIAGNOSIS_MAP)) {
+    if (key.includes(needle)) return id;
+  }
+  return null;
+}
 import {
   Dialog,
   DialogContent,
@@ -93,6 +123,41 @@ export function ContextPanel({
   const [askText, setAskText] = useState("");
   const [reply, setReply] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
+
+  // Cardiology module — classify the active case against the cardiology
+  // guideline set and surface the CardiologyBoard when the working DX is a
+  // cardiac diagnosis. Classification is keyed off the real backend
+  // /api/cardiology/intake endpoint (deterministic, auditable).
+  const [cardioIntake, setCardioIntake] = useState<IntakeClassification | null>(null);
+  const [cardioLoading, setCardioLoading] = useState(false);
+  const [cardioError, setCardioError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const diagnosisId = resolveCardioDiagnosis(patient.dx);
+    // Reset whenever the case (or its DX) changes.
+    setCardioIntake(null);
+    setCardioError(null);
+    if (!diagnosisId) return;
+    setCardioLoading(true);
+    classifyIntake({
+      case_id: patient.id,
+      diagnosis_id: diagnosisId,
+      source: patient.status === "crit" ? "emergency" : "internal_clinic",
+    })
+      .then((data) => {
+        if (!cancelled) setCardioIntake(data);
+      })
+      .catch((e) => {
+        if (!cancelled) setCardioError(e?.message || "Failed to load cardiology board");
+      })
+      .finally(() => {
+        if (!cancelled) setCardioLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [patient.id, patient.dx, patient.status]);
 
   // Referral status — derived server-side from real case data (same pattern
   // as the Active Care Team reasons). Refetched when the case changes.
@@ -357,6 +422,28 @@ export function ContextPanel({
               </div>
             </div>
           </div>
+
+          {/* Cardiology Board — only rendered for cardiac working diagnoses.
+              Driven entirely by the auditable /api/cardiology endpoints. */}
+          {cardioLoading && (
+            <div className="p-5 rounded-xl border border-line bg-void flex flex-col gap-2">
+              <span className="text-[10px] font-mono uppercase tracking-widest text-gold">
+                Cardiology Board
+              </span>
+              <p className="text-[11px] text-muted leading-snug">Loading cardiology pathway…</p>
+            </div>
+          )}
+          {cardioError && (
+            <div className="p-5 rounded-xl border border-rose/40 bg-rose/5 flex flex-col gap-1">
+              <span className="text-[10px] font-mono uppercase tracking-widest text-rose">
+                Cardiology Board
+              </span>
+              <p className="text-[11px] text-cream/80 leading-snug">{cardioError}</p>
+            </div>
+          )}
+          {cardioIntake && (
+            <CardiologyBoard intake={cardioIntake} physicianName={user.name} />
+          )}
 
           <div className="flex gap-2">
             <Button

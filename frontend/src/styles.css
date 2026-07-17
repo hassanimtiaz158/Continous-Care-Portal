@@ -3,8 +3,11 @@
 
 @theme {
   --color-void: #0B1119;
+  --color-void-2: #141C24;
+  --color-void-3: #111A26;
   --color-slate: #141C24;
   --color-gold: #C9A227;
+  --color-gold-dim: #8A731E;
   --color-teal: #3D8B8B;
   --color-rose: #B23A48;
   --color-muted: #7C8494;

@@ -1,0 +1,116 @@
+{
+  "version": "2026.1",
+  "sources": [
+    "ACC/AHA 2022 Aortic Disease Guideline",
+    "ESC 2023 Cardiomyopathies Guideline (HOCM)",
+    "ACC/AHA 2025 ACS Guideline",
+    "AHA 2017 Kawasaki Disease Scientific Statement",
+    "AHA/ASA 2024 Acute Ischemic Stroke Guideline",
+    "EULAR 2023 SLE Cardiac Involvement Recommendations"
+  ],
+  "diagnoses": [
+    {
+      "id": "AORTIC_DISSECTION",
+      "label": "Aortic dissection (suspected/confirmed)",
+      "default_pathway": ["A", "C", "D"],
+      "urgency": "stat",
+      "labs": [
+        {"test": "d_dimer", "label": "D-dimer", "critical_rule": "value > 500", "critical_note": "Elevated D-dimer supports dissection; does not rule it out if normal in high pre-test probability."},
+        {"test": "troponin", "label": "Troponin (high-sensitivity)", "critical_rule": "value > 0.04", "critical_note": "May be elevated if dissection involves coronary ostia."},
+        {"test": "cbc", "label": "CBC", "critical_rule": null, "critical_note": null},
+        {"test": "type_and_crossmatch", "label": "Type & crossmatch", "critical_rule": null, "critical_note": "Required pre-operatively for CT Surgery."},
+        {"test": "renal_function", "label": "Renal function (Cr/eGFR)", "critical_rule": "egfr < 30", "critical_note": "Contrast-nephropathy risk before CT angiography."}
+      ],
+      "imaging": [
+        {"study": "ct_angiography", "label": "CT Angiography (chest/abdomen)", "urgency": "stat"}
+      ],
+      "consulting_departments": ["cardiothoracic_surgery", "radiology"]
+    },
+    {
+      "id": "HOCM_SUSPECTED",
+      "label": "Suspected hypertrophic obstructive cardiomyopathy",
+      "default_pathway": ["B"],
+      "urgency": "urgent",
+      "labs": [
+        {"test": "bnp", "label": "BNP / NT-proBNP", "critical_rule": null, "critical_note": null},
+        {"test": "electrolytes", "label": "Electrolytes", "critical_rule": null, "critical_note": null}
+      ],
+      "imaging": [
+        {"study": "echocardiogram", "label": "Transthoracic echocardiogram", "urgency": "urgent"}
+      ],
+      "consulting_departments": ["family_medicine"]
+    },
+    {
+      "id": "ACUTE_MI",
+      "label": "Acute myocardial infarction",
+      "default_pathway": ["A"],
+      "urgency": "stat",
+      "labs": [
+        {"test": "troponin_serial", "label": "Troponin (serial)", "critical_rule": "value > 0.04", "critical_note": "Diagnostic for myocardial injury; trend confirms infarction."},
+        {"test": "ck_mb", "label": "CK-MB", "critical_rule": null, "critical_note": null},
+        {"test": "lipid_panel", "label": "Lipid panel", "critical_rule": null, "critical_note": null},
+        {"test": "cbc", "label": "CBC", "critical_rule": null, "critical_note": null},
+        {"test": "coags", "label": "Coagulation panel", "critical_rule": null, "critical_note": null},
+        {"test": "renal_function", "label": "Renal function", "critical_rule": "egfr < 30", "critical_note": null}
+      ],
+      "imaging": [
+        {"study": "ecg", "label": "12-lead ECG", "urgency": "stat"},
+        {"study": "echocardiogram", "label": "Echocardiogram", "urgency": "routine"}
+      ],
+      "consulting_departments": []
+    },
+    {
+      "id": "KAWASAKI_DISEASE",
+      "label": "Kawasaki disease",
+      "default_pathway": ["D"],
+      "urgency": "urgent",
+      "labs": [
+        {"test": "cbc", "label": "CBC", "critical_rule": null, "critical_note": null},
+        {"test": "crp", "label": "CRP", "critical_rule": "value > 30", "critical_note": null},
+        {"test": "esr", "label": "ESR", "critical_rule": "value > 40", "critical_note": null},
+        {"test": "lft", "label": "Liver function tests", "critical_rule": null, "critical_note": null},
+        {"test": "urinalysis", "label": "Urinalysis", "critical_rule": null, "critical_note": null},
+        {"test": "blood_culture", "label": "Blood culture", "critical_rule": null, "critical_note": "Used to exclude infectious mimics before confirming Kawasaki."}
+      ],
+      "imaging": [
+        {"study": "echocardiogram", "label": "Echocardiogram (coronary arteries)", "urgency": "urgent"}
+      ],
+      "consulting_departments": ["radiology"]
+    },
+    {
+      "id": "ACUTE_STROKE_HTN_DM",
+      "label": "Acute stroke with chronic hypertension/diabetes",
+      "default_pathway": ["C"],
+      "urgency": "stat",
+      "labs": [
+        {"test": "hba1c", "label": "HbA1c", "critical_rule": null, "critical_note": null},
+        {"test": "lipid_panel", "label": "Lipid panel", "critical_rule": null, "critical_note": null},
+        {"test": "renal_function", "label": "Renal function", "critical_rule": null, "critical_note": null},
+        {"test": "coags", "label": "Coagulation panel", "critical_rule": null, "critical_note": "Required for thrombolysis eligibility."},
+        {"test": "electrolytes", "label": "Electrolytes", "critical_rule": null, "critical_note": null}
+      ],
+      "imaging": [
+        {"study": "ct_mri_brain", "label": "CT/MRI brain (performed by Neurology)", "urgency": "stat"}
+      ],
+      "consulting_departments": ["neurology"]
+    },
+    {
+      "id": "SLE_PERICARDITIS",
+      "label": "SLE with pericarditis",
+      "default_pathway": ["C"],
+      "urgency": "urgent",
+      "labs": [
+        {"test": "ana", "label": "ANA", "critical_rule": null, "critical_note": null},
+        {"test": "complement", "label": "Complement (C3/C4)", "critical_rule": null, "critical_note": null},
+        {"test": "anti_dsdna", "label": "Anti-dsDNA", "critical_rule": null, "critical_note": null},
+        {"test": "esr_crp", "label": "ESR/CRP", "critical_rule": null, "critical_note": null},
+        {"test": "renal_function", "label": "Renal function", "critical_rule": null, "critical_note": "Overlap with Nephrology's lupus nephritis workup."},
+        {"test": "troponin", "label": "Troponin", "critical_rule": "value > 0.04", "critical_note": "Elevated troponin raises concern for concurrent myocarditis."}
+      ],
+      "imaging": [
+        {"study": "echocardiogram", "label": "Echocardiogram (effusion/tamponade)", "urgency": "urgent"}
+      ],
+      "consulting_departments": ["nephrology"]
+    }
+  ]
+}

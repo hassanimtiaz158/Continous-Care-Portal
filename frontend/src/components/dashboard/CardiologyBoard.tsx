@@ -350,6 +350,24 @@ export function CardiologyBoard({ intake, physicianName }: CardiologyBoardProps)
   const [ownership, setOwnership] = useState<OwnershipState | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const [transferring, setTransferring] = useState(false);
+  const [transferTo, setTransferTo] = useState<Department>("cardiothoracic_surgery");
+  const [transferReason, setTransferReason] = useState("");
+
+  async function handleTransfer() {
+    if (!transferReason.trim()) return;
+    setTransferring(true);
+    try {
+      const updated = await transferOwnership(intake.case_id, transferTo, transferReason, physicianName);
+      setOwnership(updated);
+      setTransferReason("");
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setTransferring(false);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -467,6 +485,41 @@ export function CardiologyBoard({ intake, physicianName }: CardiologyBoardProps)
             Ownership Chain
           </span>
           <OwnershipTimeline ownership={ownership} />
+
+          <div className="mt-4 flex flex-col gap-2 rounded-md border border-line bg-void-3 p-3">
+            <span className="text-[10px] font-mono uppercase tracking-widest text-muted">Transfer Ownership</span>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <select
+                className="h-8 rounded-md bg-void border border-line text-xs text-cream px-2 flex-1 outline-none focus:border-gold/50 transition-colors"
+                value={transferTo}
+                onChange={(e) => setTransferTo(e.target.value as Department)}
+                disabled={transferring}
+              >
+                {Object.entries(DEPARTMENT_LABEL).map(([val, label]) => (
+                  <option key={val} value={val}>{label}</option>
+                ))}
+              </select>
+              <input
+                className="h-8 rounded-md bg-void border border-line text-xs text-cream px-3 flex-[2] outline-none focus:border-gold/50 transition-colors"
+                placeholder="Reason for transfer..."
+                value={transferReason}
+                onChange={(e) => setTransferReason(e.target.value)}
+                disabled={transferring}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleTransfer();
+                }}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 border-gold/40 text-gold hover:bg-gold/5 uppercase tracking-widest font-mono text-[10px] shrink-0"
+                disabled={transferring || !transferReason.trim()}
+                onClick={handleTransfer}
+              >
+                {transferring ? "Transferring..." : "Transfer"}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>

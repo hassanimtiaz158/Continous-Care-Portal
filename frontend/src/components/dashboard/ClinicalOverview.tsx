@@ -9,7 +9,7 @@ import { AIInsight } from "./AIInsight";
 import { SectionHeader } from "../shared/SectionHeader";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
-import { Plus, Users, MessageSquare, Inbox, AlertTriangle } from "lucide-react";
+import { Plus, Users, MessageSquare, Inbox, AlertTriangle, Activity } from "lucide-react";
 import { motion } from "framer-motion";
 import { PatientData } from "../../types/patient";
 import { ReferralResponse } from "../../lib/api";
@@ -93,6 +93,7 @@ export function ClinicalOverview({
       );
     });
   const chatCases = patients.filter((p) => chatMap[p.id]?.length > 0);
+  const monitoringCases = patients.filter((p) => p.status === "stable" || p.caseProgress === "Monitoring");
 
   return (
     <div className="h-full w-full overflow-y-auto p-4 md:p-6 lg:p-8 pb-24">
@@ -237,6 +238,23 @@ export function ClinicalOverview({
                       </motion.div>
                     );
                   })}
+                </div>
+              )}
+            </section>
+
+            {/* ---- Section 4: Under Monitoring ---- */}
+            <section>
+              <SectionHeader
+                title="Under Monitoring"
+                subtitle="Stable patients · routine follow-up"
+              />
+              {monitoringCases.length === 0 ? (
+                <CardEmpty icon={<Activity className="w-4 h-4 opacity-50" />} text="No stable cases right now." />
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  {monitoringCases.map((p, i) => (
+                    <CaseRow key={p.id} p={p} i={i} onOpen={onOpenPatient} />
+                  ))}
                 </div>
               )}
             </section>

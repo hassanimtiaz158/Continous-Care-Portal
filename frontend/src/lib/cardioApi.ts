@@ -78,6 +78,12 @@ export async function classifyIntake(payload: {
   return res.json();
 }
 
+export async function fetchIntake(caseId: string): Promise<IntakeClassification> {
+  const res = await fetch(`${API_BASE}/api/cardiology/cases/${caseId}/intake`);
+  if (!res.ok) throw new Error("Failed to fetch intake classification");
+  return res.json();
+}
+
 export async function fetchLabOrders(caseId: string): Promise<LabOrder[]> {
   const res = await fetch(`${API_BASE}/api/cardiology/cases/${caseId}/labs`);
   if (!res.ok) throw new Error("Failed to fetch lab orders");

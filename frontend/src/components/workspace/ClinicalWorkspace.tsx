@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Role } from "../../types/auth";
 import { PatientData } from "../../types/patient";
 import { BoardResult, WorkflowStage } from "../../types/board";
-import { ContextPanel } from "./ContextPanel";
+import { ContextPanel, resolveCardioDiagnosis } from "./ContextPanel";
 import { WorkspaceCanvas } from "./WorkspaceCanvas";
 import { fetchChat, sendChat, ReferralResponse } from "@/lib/api";
 
@@ -52,12 +52,15 @@ export function ClinicalWorkspace({
   const [chatMessages, setChatMessages] = useState<any[]>([]);
 
   // Compute completeness
-  const checkFields = ["vitals.bp", "screening.symptoms", "glycemic.hba1c", "renal.creatinine"];
+  const checkFields = ["vitals.bp", "chiefComplaint", "glycemic.hba1c", "renal.creat"];
   const filled = checkFields.filter((f) => {
+    if (f === "chiefComplaint") return !!patient.chiefComplaint;
     const [sec, key] = f.split(".");
     return !!(patient as any)[sec]?.[key];
   }).length;
   const completeness = Math.round((filled / checkFields.length) * 100);
+
+  const isCardiac = !!resolveCardioDiagnosis(patient.dx);
 
   // Derive stage
   let stage: WorkflowStage = "intake";
@@ -119,6 +122,7 @@ export function ClinicalWorkspace({
         onToggleProveIt={onToggleProveIt}
         hoveredMetric={hoveredMetric}
         onHoverMetric={setHoveredMetric}
+        isCardiac={isCardiac}
       />
       <ContextPanel
         patient={patient}

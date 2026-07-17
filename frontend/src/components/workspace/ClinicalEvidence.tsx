@@ -30,7 +30,6 @@ const SECTIONS: {
       { key: "bp", label: "Blood Pressure" },
       { key: "hr", label: "Heart Rate" },
       { key: "temp", label: "Temperature" },
-      { key: "o2", label: "O2 Saturation" },
     ],
   },
   {
@@ -43,7 +42,7 @@ const SECTIONS: {
     label: "Glycemic Panel",
     fields: [
       { key: "hba1c", label: "HbA1c" },
-      { key: "fasting", label: "Fasting Glucose" },
+      { key: "fbs", label: "Fasting Glucose" },
     ],
   },
   {
@@ -56,10 +55,11 @@ const SECTIONS: {
   },
   {
     id: "cardiac",
-    label: "Cardiac Markers",
+    label: "Cardiac Examination",
     fields: [
-      { key: "trop", label: "Troponin" },
-      { key: "bnp", label: "BNP" },
+      { key: "sounds", label: "Heart Sounds" },
+      { key: "grade", label: "Murmur Grade" },
+      { key: "notes", label: "Clinical Notes" },
     ],
   },
   {
@@ -136,11 +136,7 @@ export function ClinicalEvidence({
                       <div className="flex gap-2 text-[9px] font-mono text-muted/50">
                         {val && (
                           <span className="flex items-center gap-1">
-                            <Clock className="w-2.5 h-2.5" />{" "}
-                            {new Date().toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
+                            <Database className="w-2.5 h-2.5" /> EMR
                           </span>
                         )}
                         {val && (

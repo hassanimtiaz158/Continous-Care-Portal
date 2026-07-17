@@ -329,6 +329,10 @@ _PATIENTS["EG-1183"] = _real_patient("EG-1183",
 _PATIENTS["EG-6640"] = _real_patient("EG-6640",
     meds=["Metformin (dose not confirmed in record)"],
     missing=[])
+
+_PATIENTS["EG-7701"] = _real_patient("EG-7701", meds=[], missing=[])
+_PATIENTS["EG-7812"] = _real_patient("EG-7812", meds=[], missing=[])
+
 # --- Registry capacity: up to 50 patients total. The 6 above are the
 # hand-authored demo cases. Additional patients are added through real
 # physician intake via POST /api/patients (see below) rather than

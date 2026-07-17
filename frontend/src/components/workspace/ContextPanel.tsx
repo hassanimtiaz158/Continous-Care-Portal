@@ -22,13 +22,14 @@ import { fetchReferral, setReferral, ReferralResponse } from "@/lib/api";
 import { CardiologyBoard } from "../dashboard/CardiologyBoard";
 import {
   classifyIntake,
+  fetchIntake,
   IntakeClassification,
 } from "@/lib/cardioApi";
 
 // Working diagnoses in the registry that map to the Cardiology module's
 // guideline keys. A case is only surfaced to the Cardiology Board when its
 // working DX matches one of these.
-const CARDIO_DIAGNOSIS_MAP: Record<string, string> = {
+export const CARDIO_DIAGNOSIS_MAP: Record<string, string> = {
   "aortic dissection": "AORTIC_DISSECTION",
   "hypertrophic obstructive cardiomyopathy": "HOCM_SUSPECTED",
   hocm: "HOCM_SUSPECTED",
@@ -41,7 +42,7 @@ const CARDIO_DIAGNOSIS_MAP: Record<string, string> = {
 };
 
 /** Resolve a working DX string to a cardiology guideline id, or null. */
-function resolveCardioDiagnosis(dx: string): string | null {
+export function resolveCardioDiagnosis(dx: string): string | null {
   const key = (dx || "").toLowerCase().trim();
   if (!key) return null;
   for (const [needle, id] of Object.entries(CARDIO_DIAGNOSIS_MAP)) {
@@ -140,19 +141,29 @@ export function ContextPanel({
     setCardioError(null);
     if (!diagnosisId) return;
     setCardioLoading(true);
-    classifyIntake({
-      case_id: patient.id,
-      diagnosis_id: diagnosisId,
-      source: patient.status === "crit" ? "emergency" : "internal_clinic",
-    })
+    fetchIntake(patient.id)
       .then((data) => {
-        if (!cancelled) setCardioIntake(data);
+        if (!cancelled) {
+          setCardioIntake(data);
+          setCardioLoading(false);
+        }
       })
-      .catch((e) => {
-        if (!cancelled) setCardioError(e?.message || "Failed to load cardiology board");
-      })
-      .finally(() => {
-        if (!cancelled) setCardioLoading(false);
+      .catch(() => {
+        if (cancelled) return;
+        classifyIntake({
+          case_id: patient.id,
+          diagnosis_id: diagnosisId,
+          source: patient.status === "crit" ? "emergency" : "internal_clinic",
+        })
+          .then((data) => {
+            if (!cancelled) setCardioIntake(data);
+          })
+          .catch((e) => {
+            if (!cancelled) setCardioError(e?.message || "Failed to load cardiology board");
+          })
+          .finally(() => {
+            if (!cancelled) setCardioLoading(false);
+          });
       });
     return () => {
       cancelled = true;
@@ -449,13 +460,17 @@ export function ContextPanel({
             <Button
               variant="outline"
               size="sm"
-              className="flex-1 border-line text-muted hover:text-cream hover:bg-void-3 h-8 text-[10px] uppercase font-mono tracking-widest gap-1"
+              disabled
+              title="Labs integration coming soon"
+              className="flex-1 border-line text-muted/50 h-8 text-[10px] uppercase font-mono tracking-widest gap-1 cursor-not-allowed"
             >
               <TestTube className="w-3 h-3" /> Labs
             </Button>
             <Button
               variant="outline"
               size="sm"
+              onClick={() => window.dispatchEvent(new CustomEvent("scroll-to-chat"))}
+              title="Jump to clinical discussion"
               className="flex-1 border-line text-muted hover:text-cream hover:bg-void-3 h-8 text-[10px] uppercase font-mono tracking-widest gap-1"
             >
               <MessageSquare className="w-3 h-3" /> Ping

@@ -33,6 +33,7 @@ interface WorkspaceCanvasProps {
   onToggleProveIt: () => void;
   hoveredMetric: string | null;
   onHoverMetric: (metric: string | null) => void;
+  isCardiac?: boolean;
 }
 
 export function WorkspaceCanvas({
@@ -52,6 +53,7 @@ export function WorkspaceCanvas({
   onToggleProveIt,
   hoveredMetric,
   onHoverMetric,
+  isCardiac,
 }: WorkspaceCanvasProps) {
   const [deliberationComplete, setDeliberationComplete] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -71,6 +73,14 @@ export function WorkspaceCanvas({
       return () => clearTimeout(t);
     }
   }, [isLocked]);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      document.getElementById("clinical-discussion-section")?.scrollIntoView({ behavior: "smooth" });
+    };
+    window.addEventListener("scroll-to-chat", handleScroll);
+    return () => window.removeEventListener("scroll-to-chat", handleScroll);
+  }, []);
 
   const getStatus = (stage: WorkflowStage) => {
     if (isLocked) return "locked";
@@ -165,13 +175,22 @@ export function WorkspaceCanvas({
             </span>
           }
         >
-          <AIBoardSection
-            boardResult={boardResult}
-            onRunBoard={onRunBoard}
-            isLocked={isLocked}
-            isRunning={isRunningBoard}
-            onDeliberationComplete={() => setDeliberationComplete(true)}
-          />
+          {isCardiac ? (
+            <div className="p-4 rounded-xl border border-line bg-void-3 text-muted text-sm flex flex-col gap-2">
+              <span className="font-mono text-[10px] uppercase tracking-widest text-gold mb-1">
+                Cardiac Pathway Active
+              </span>
+              This case is being managed via the Cardiology Board. The standard SHURA AI Board run is disabled for cardiac cases to prevent conflicting recommendations.
+            </div>
+          ) : (
+            <AIBoardSection
+              boardResult={boardResult}
+              onRunBoard={onRunBoard}
+              isLocked={isLocked}
+              isRunning={isRunningBoard}
+              onDeliberationComplete={() => setDeliberationComplete(true)}
+            />
+          )}
         </WorkflowStageWrapper>
 
         {/* 3. Consensus */}

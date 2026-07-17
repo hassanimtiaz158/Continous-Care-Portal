@@ -223,6 +223,36 @@ def get_audit_trail(session_id: str) -> dict[str, Any] | None:
     }
 
 
+def get_sessions_for_patient(patient_id: str) -> list[dict[str, Any]]:
+    """Retrieve all board sessions for a specific patient."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT * FROM board_sessions WHERE patient_id = ? ORDER BY created_at DESC",
+        (patient_id,),
+    ).fetchall()
+    
+    sessions = []
+    for row in rows:
+        sessions.append({
+            "session_id": row["session_id"],
+            "patient_id": row["patient_id"],
+            "created_at": row["created_at"],
+            "agent_status": json.loads(row["agent_status"]),
+            "recommendations": json.loads(row["recommendations"]),
+            "specialist_risk_levels": json.loads(row["specialist_risk_levels"]) if row["specialist_risk_levels"] else {},
+            "specialist_findings": json.loads(row["specialist_findings"]) if row["specialist_findings"] else {},
+            "consensus": json.loads(row["consensus"]) if row["consensus"] else {},
+            "data_completeness": row["data_completeness"],
+            "confidence_scores": json.loads(row["confidence_scores"]) if row["confidence_scores"] else {},
+            "decision": row["decision"],
+            "edited_text": row["edited_text"],
+            "physician_note": row["physician_note"],
+            "physician_name": row["physician_name"],
+            "decided_at": row["decided_at"],
+        })
+    return sessions
+
+
 # ---------------------------------------------------------------------------
 # Cardiology module persistence — TDD §4.
 #

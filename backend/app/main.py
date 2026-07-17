@@ -194,6 +194,26 @@ _SHURA_PATIENTS["EG-6640"] = _sp(
     case_progress="Intake", registered_at="2026-07-16T10:05:00"
 )
 
+# Cardiac demo case — surfaces the Cardiology module (Intake Classifier,
+# Lab/Imaging Orders Agents, Ownership state machine) end-to-end. Working DX
+# matches CARDIO_DIAGNOSIS_MAP -> AORTIC_DISSECTION (pathways A + C + D).
+_SHURA_PATIENTS["EG-7701"] = _sp(
+    id="EG-7701", name="R.T.", age=63, sex="Male", dx="Aortic dissection (suspected)", status="crit",
+    medications=[],
+    screening={"rbg":"112","hba1c":"5.3","bp":"178/102","date":"17/07/2026"},
+    glycemic={"hba1c":"5.3","fbs":"108","rbs":"—"},
+    vitals={"bp":"178/102","hr":"104","weight":"84","temp":"36.8"},
+    renal={"egfr":"88","creat":"0.9","acr":"8","k":"4.2"},
+    cardiac={"sounds":"Diastolic murmur at right sternal border","grade":"—","notes":"Tearing chest/back pain, pulse deficit noted on exam."},
+    ecg={"rhythm":"Sinus tachycardia","rate":"104","findings":"No ST changes."},
+    gpNote="Sudden-onset tearing chest/back pain, BP differential between arms. High suspicion for type A aortic dissection — needs urgent CT angiography.",
+    chiefComplaint="Sudden severe tearing chest and back pain radiating to abdomen, 40 minutes.",
+    agents={"endo":{"rec":"No endocrine indication.","conf":97},"neph":{"rec":"Renal function normal — no renal concern.","conf":98},"card":{"rec":"High suspicion aortic dissection — urgent CT angiography and cardiothoracic surgical review.","conf":95,"warn":True}},
+    plan="Stat CT angiography (chest/abdomen). Activate cardiothoracic surgery. Cardiology owns case with CT surgery consulting.",
+    edu="You are being rushed for an urgent heart scan. Please stay still and a surgical team is being notified.",
+    case_progress="Physician Review", registered_at="2026-07-17T09:05:00"
+)
+
 
 # Also seed the original Patient model for board/run compatibility
 CCP014 = Patient(

@@ -8,12 +8,15 @@ import {
   ImagingOrder,
   IntakeClassification,
   LabOrder,
+  OrderStatus,
   OwnershipState,
   Pathway,
   acknowledgeCriticalValue,
+  confirmDraftResult,
   fetchImagingOrders,
   fetchLabOrders,
   fetchOwnership,
+  updateImagingStatus,
 } from "../../lib/cardioApi";
 
 interface CardiologyBoardProps {
@@ -134,13 +137,16 @@ function LabRow({
   caseId,
   physicianName,
   onAcknowledged,
+  onDraftConfirmed,
 }: {
   order: LabOrder;
   caseId: string;
   physicianName: string;
   onAcknowledged: (updated: LabOrder) => void;
+  onDraftConfirmed: (updated: LabOrder) => void;
 }) {
   const [acking, setAcking] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const needsSignoff = order.critical && !order.acknowledged_by;
 
   async function handleAcknowledge() {
@@ -151,6 +157,16 @@ function LabRow({
       onAcknowledged(updated);
     } finally {
       setAcking(false);
+    }
+  }
+
+  async function handleConfirmDraft() {
+    setConfirming(true);
+    try {
+      const updated = await confirmDraftResult(caseId, order.id);
+      onDraftConfirmed(updated);
+    } finally {
+      setConfirming(false);
     }
   }
 
@@ -181,6 +197,22 @@ function LabRow({
           <StatusRibbon status={order.status} />
         </div>
       </div>
+      {order.is_draft && (
+        <div className="flex items-center justify-between gap-2 border-t border-line/60 pt-1.5">
+          <span className="text-[10px] text-gold">
+            OCR-derived — physician confirmation required
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-6 border-gold-dim px-2 text-[10px] text-gold"
+            disabled={confirming}
+            onClick={handleConfirmDraft}
+          >
+            {confirming ? "Confirming…" : "Confirm Result"}
+          </Button>
+        </div>
+      )}
       {order.critical && (
         <div className="flex items-center justify-between gap-2 border-t border-line/60 pt-1.5">
           {order.acknowledged_by ? (
@@ -207,7 +239,35 @@ function LabRow({
   );
 }
 
-function ImagingRow({ order }: { order: ImagingOrder }) {
+const IMAGING_NEXT_STATUS: Record<string, OrderStatus> = {
+  ordered: "collected",
+  collected: "resulting",
+  resulting: "resulted",
+};
+
+function ImagingRow({
+  order,
+  caseId,
+  onUpdated,
+}: {
+  order: ImagingOrder;
+  caseId: string;
+  onUpdated: (updated: ImagingOrder) => void;
+}) {
+  const [advancing, setAdvancing] = useState(false);
+  const next = IMAGING_NEXT_STATUS[order.status];
+
+  async function handleAdvance() {
+    if (!next) return;
+    setAdvancing(true);
+    try {
+      const updated = await updateImagingStatus(caseId, order.id, next);
+      onUpdated(updated);
+    } finally {
+      setAdvancing(false);
+    }
+  }
+
   return (
     <div className="flex items-center justify-between gap-3 rounded-md border border-line bg-void-3 px-3 py-2">
       <div className="flex flex-col">
@@ -221,6 +281,17 @@ function ImagingRow({ order }: { order: ImagingOrder }) {
           {order.urgency}
         </Badge>
         <StatusRibbon status={order.status} />
+        {next && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-6 border-gold-dim px-2 text-[10px] text-gold"
+            disabled={advancing}
+            onClick={handleAdvance}
+          >
+            {advancing ? "…" : `→ ${next}`}
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -356,6 +427,9 @@ export function CardiologyBoard({ intake, physicianName }: CardiologyBoardProps)
                   onAcknowledged={(updated) =>
                     setLabs((prev) => prev.map((l) => (l.id === updated.id ? updated : l)))
                   }
+                  onDraftConfirmed={(updated) =>
+                    setLabs((prev) => prev.map((l) => (l.id === updated.id ? updated : l)))
+                  }
                 />
               ))}
             </div>
@@ -369,7 +443,14 @@ export function CardiologyBoard({ intake, physicianName }: CardiologyBoardProps)
             </div>
             <div className="flex flex-col gap-1.5">
               {imaging.map((o) => (
-                <ImagingRow key={o.id} order={o} />
+                <ImagingRow
+                  key={o.id}
+                  order={o}
+                  caseId={intake.case_id}
+                  onUpdated={(updated) =>
+                    setImaging((prev) => prev.map((i) => (i.id === updated.id ? updated : i)))
+                  }
+                />
               ))}
             </div>
           </div>

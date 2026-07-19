@@ -153,7 +153,7 @@ ICD10_AGENT = AgentDef(
     tab="ICD-10 Coding Agent",
     role="Clinical Coding — Chief Complaint to ICD-10",
     metrics=[],
-    model="qwen-flash",
+    model="qwen-turbo",
     system=(
         "You are the ICD-10 Coding agent for a primary care visit. You will "
         "be given a patient's chief complaint (free text) and a SHORT LIST "

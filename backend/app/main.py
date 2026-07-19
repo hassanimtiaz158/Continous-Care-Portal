@@ -330,8 +330,9 @@ _PATIENTS["EG-6640"] = _real_patient("EG-6640",
     meds=["Metformin (dose not confirmed in record)"],
     missing=[])
 
-_PATIENTS["EG-7701"] = _real_patient("EG-7701", meds=[], missing=[])
-_PATIENTS["EG-7812"] = _real_patient("EG-7812", meds=[], missing=[])
+# EG-7701 and EG-7812 are purely cardiology cases and do not use the chronic
+# AI board flow, so we do NOT seed them into _PATIENTS.
+
 
 # --- Registry capacity: up to 50 patients total. The 6 above are the
 # hand-authored demo cases. Additional patients are added through real
@@ -371,6 +372,66 @@ def health():
     return HealthResponse(
         qwen_key_set=bool(os.getenv("DASHSCOPE_API_KEY")),
     )
+
+@app.get("/api/diagnostics/persistence")
+def diagnostics_persistence():
+    import os
+    from app.audit import _get_conn, _DB_PATH
+    path = _DB_PATH or Path(__file__).resolve().parent.parent / "audit.db"
+    
+    conn = _get_conn(path)
+    tables = [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+    
+    referral_count = len(_REFERRALS)
+    events_count = sum(len(v) for v in _CASE_EVENTS.values())
+    
+    return {
+        "database_type": "sqlite",
+        "database_path": str(path),
+        "database_exists": path.exists(),
+        "database_size_bytes": path.stat().st_size if path.exists() else 0,
+        "tables": tables,
+        "in_memory_referrals": referral_count,
+        "in_memory_events": events_count,
+        "process_working_directory": os.getcwd(),
+        "persistence_mode": "ephemeral in production without a disk attached"
+    }
+
+@app.get("/api/test-dashscope")
+async def test_dashscope():
+    """Development-only diagnostic endpoint to test DashScope connectivity safely."""
+    api_key = os.getenv("DASHSCOPE_API_KEY")
+    if not api_key:
+        return {"status": "error", "message": "DASHSCOPE_API_KEY is not set"}
+        
+    client = AsyncOpenAI(api_key=api_key, base_url=DASHSCOPE_BASE_URL)
+    try:
+        # Minimal request to test auth and model validity
+        res = await client.chat.completions.create(
+            model="qwen-plus",
+            messages=[{"role": "user", "content": "hello"}],
+            max_tokens=10
+        )
+        return {
+            "status": "success",
+            "model_used": "qwen-plus",
+            "endpoint": DASHSCOPE_BASE_URL,
+            "response": res.choices[0].message.content
+        }
+    except Exception as exc:
+        import logging
+        logger = logging.getLogger(__name__)
+        error_body = getattr(exc, "response", None)
+        error_json = getattr(error_body, "json", lambda: {})() if error_body else str(exc)
+        logger.error("Test API failed: %s - %s", type(exc).__name__, error_json)
+        return {
+            "status": "error",
+            "exception_type": type(exc).__name__,
+            "error_details": error_json,
+            "endpoint": DASHSCOPE_BASE_URL
+        }
+    finally:
+        await client.close()
 
 
 @app.post("/api/board/run")
@@ -909,11 +970,6 @@ def care_team(case_id: str):
 # stored on the case record.
 # ---------------------------------------------------------------------------
 
-# Per-case referral decisions, keyed by uppercased case id. Persisted in memory
-# for the demo (a real deployment would store this on the case record / DB).
-_REFERRALS: dict[str, dict] = {}
-
-
 def _build_referral(p: ShuraPatient, care_team: dict | None = None) -> dict:
     if care_team is None:
         care_team = _build_care_team(p)
@@ -934,8 +990,11 @@ def _build_referral(p: ShuraPatient, care_team: dict | None = None) -> dict:
         consensus_conflict = isinstance(conflicts, list) and len(conflicts) > 0
 
     # Stored PCP decision (if any) overrides the system recommendation.
-    existing = _REFERRALS.get(p.id.upper())
-    if existing:
+    from app.audit import load_referral_decision
+    existing_json = load_referral_decision(p.id.upper())
+    if existing_json:
+        import json
+        existing = json.loads(existing_json)
         return {
             "case_id": p.id,
             "referral_status": existing["referral_status"],
@@ -1045,7 +1104,9 @@ def set_referral(case_id: str, req: ReferralDecisionRequest):
             "note": req.note,
         }
 
-    _REFERRALS[case_id.upper()] = record
+    from app.audit import save_referral_decision
+    import json
+    save_referral_decision(case_id.upper(), json.dumps(record))
 
     # Append to the case audit log (reuse the board audit trail mechanism when
     # a session exists; otherwise just record the action on the referral).
@@ -1068,15 +1129,13 @@ def set_referral(case_id: str, req: ReferralDecisionRequest):
 
 
 def _append_case_event(case_id: str, text: str, ts: str) -> None:
-    """Best-effort append of a referral action to the case's audit log.
-
-    If a board session exists for the case we attach to it; otherwise we keep a
-    lightweight in-memory event list keyed by case id.
-    """
-    _CASE_EVENTS.setdefault(case_id.upper(), []).append({"ts": ts, "event": text})
-
-
-_CASE_EVENTS: dict[str, list] = {}
+    """Append a referral action to the case's audit log."""
+    from app.audit import load_case_events, save_case_events
+    import json
+    existing_json = load_case_events(case_id.upper())
+    events = json.loads(existing_json) if existing_json else []
+    events.append({"ts": ts, "event": text})
+    save_case_events(case_id.upper(), json.dumps(events))
 
 
 @app.get("/api/cases/{case_id}/referral-log")
@@ -1085,7 +1144,11 @@ def get_referral_log(case_id: str):
     p = _SHURA_PATIENTS.get(case_id.upper())
     if p is None:
         raise HTTPException(status_code=404, detail=f"Patient {case_id} not found")
-    return {"case_id": p.id, "events": _CASE_EVENTS.get(case_id.upper(), [])}
+    from app.audit import load_case_events
+    import json
+    existing_json = load_case_events(case_id.upper())
+    events = json.loads(existing_json) if existing_json else []
+    return {"case_id": p.id, "events": events}
 
 
 class AskShuraRequest(BaseModel):
@@ -1168,7 +1231,12 @@ async def ask_shura(req: AskShuraRequest):
             max_tokens=200,
         )
         answer = response.choices[0].message.content.strip()
-    except Exception:
+    except Exception as exc:
+        import logging
+        logger = logging.getLogger(__name__)
+        error_body = getattr(exc, "response", None)
+        error_json = getattr(error_body, "json", lambda: {})() if error_body else str(exc)
+        logger.error("Ask Shura API failed: %s - %s", type(exc).__name__, error_json)
         answer = (
             "AI Board deliberation unavailable — the Qwen AI service could "
             "not process your question (possibly a transient error or "

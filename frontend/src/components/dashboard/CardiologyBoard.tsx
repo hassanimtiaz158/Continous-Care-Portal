@@ -17,6 +17,7 @@ import {
   fetchLabOrders,
   fetchOwnership,
   updateImagingStatus,
+  transferOwnership,
 } from "../../lib/cardioApi";
 
 interface CardiologyBoardProps {

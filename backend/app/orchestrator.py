@@ -79,6 +79,12 @@ async def _retry_on_rate_limit(coro_factory):
                 delay,
             )
             await asyncio.sleep(delay)
+        except Exception as exc:
+            # Capture non-429 exceptions to expose exactly why it failed
+            error_body = getattr(exc, "response", None)
+            error_json = getattr(error_body, "json", lambda: {})() if error_body else {}
+            logger.error("Provider error in orchestrator: %s - %s", type(exc).__name__, error_json or str(exc))
+            raise
     raise last_exc  # type: ignore[misc]
 
 # ---------------------------------------------------------------------------
@@ -369,7 +375,9 @@ async def run_specialists(
             return result, elapsed
         except Exception as exc:
             elapsed = time.perf_counter() - t0
-            logger.exception("Agent %s failed", agent.key)
+            error_body = getattr(exc, "response", None)
+            error_json = getattr(error_body, "json", lambda: {})() if error_body else str(exc)
+            logger.exception("Agent %s failed: %s", agent.key, error_json)
             _enqueue_review(patient_id, agent.key, str(exc))
             return dict(_AGENT_FAILURE_PAYLOAD), elapsed
 

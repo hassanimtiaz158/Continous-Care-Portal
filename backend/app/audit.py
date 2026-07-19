@@ -316,6 +316,62 @@ def _cardio_delete(table: str, case_id: str) -> None:
     conn.commit()
 
 
+# ---------------------------------------------------------------------------
+# Referral and Case Events persistence
+# ---------------------------------------------------------------------------
+
+def _init_referral_schema(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS referral_decisions (
+            case_id      TEXT PRIMARY KEY,
+            payload      TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS case_events (
+            case_id      TEXT PRIMARY KEY,
+            payload      TEXT NOT NULL
+        );
+        """
+    )
+    conn.commit()
+
+def save_referral_decision(case_id: str, payload: str) -> None:
+    conn = _get_conn()
+    _init_referral_schema(conn)
+    conn.execute(
+        "INSERT INTO referral_decisions (case_id, payload) VALUES (?, ?) "
+        "ON CONFLICT(case_id) DO UPDATE SET payload = excluded.payload",
+        (case_id.upper(), payload),
+    )
+    conn.commit()
+
+def load_referral_decision(case_id: str) -> str | None:
+    conn = _get_conn()
+    _init_referral_schema(conn)
+    row = conn.execute(
+        "SELECT payload FROM referral_decisions WHERE case_id = ?", (case_id.upper(),)
+    ).fetchone()
+    return row["payload"] if row is not None else None
+
+def save_case_events(case_id: str, payload: str) -> None:
+    conn = _get_conn()
+    _init_referral_schema(conn)
+    conn.execute(
+        "INSERT INTO case_events (case_id, payload) VALUES (?, ?) "
+        "ON CONFLICT(case_id) DO UPDATE SET payload = excluded.payload",
+        (case_id.upper(), payload),
+    )
+    conn.commit()
+
+def load_case_events(case_id: str) -> str | None:
+    conn = _get_conn()
+    _init_referral_schema(conn)
+    row = conn.execute(
+        "SELECT payload FROM case_events WHERE case_id = ?", (case_id.upper(),)
+    ).fetchone()
+    return row["payload"] if row is not None else None
+
+
 # Public helpers used by cardio_routes.py --------------------------------
 
 

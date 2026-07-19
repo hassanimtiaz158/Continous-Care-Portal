@@ -122,7 +122,7 @@ CARE_COORDINATION_AGENT = AgentDef(
     tab="Care Coordination Agent",
     role="Inter-Department Coordination — Referral Replies & Consult Requests",
     metrics=[],
-    model="qwen-flash",
+    model="qwen-turbo",
     system=(
         "You are the Care Coordination agent for a cardiology department on "
         "a multi-agent clinical platform. You draft short, structured "
